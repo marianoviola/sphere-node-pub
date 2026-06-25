@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sphere.pub/spec/fragment.schema.json",
+  "title": "Sphere Fragment Manifest",
+  "description": "Contract for a single agent-readable fragment manifest (sphere.json). This file is the source of truth shared by the node, the publish script, and any external authoring tool.",
+  "type": "object",
+  "required": ["id", "title", "license", "access"],
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Fragment id, also the URL path segment. Format yyyy-mm-dd-title-slug.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9][a-z0-9-]*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX-style or named license, e.g. CC-BY."
+    },
+    "access": {
+      "type": "object",
+      "required": ["policy"],
+      "additionalProperties": true,
+      "properties": {
+        "policy": {
+          "type": "string",
+          "enum": ["free", "metered", "paid", "sponsored"]
+        },
+        "preview_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of leading characters of content.md served as a free preview for gated policies."
+        },
+        "price_per_access": {
+          "type": "number",
+          "minimum": 0
+        },
+        "currency": {
+          "type": "string",
+          "description": "ISO 4217 currency code, e.g. USD."
+        },
+        "payment": {
+          "type": "object",
+          "description": "Payment metadata used to build the 402 challenge. Required for paid and metered policies.",
+          "required": ["profile", "method", "endpoint"],
+          "additionalProperties": true,
+          "properties": {
+            "profile": { "type": "string" },
+            "method": { "type": "string" },
+            "endpoint": { "type": "string" }
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "description": "Provenance entries. Opaque to the node."
+    },
+    "relations": {
+      "type": "array",
+      "description": "Typed edges to other fragments. Opaque to the node."
+    }
+  }
+}

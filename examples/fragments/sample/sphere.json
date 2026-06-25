@@ -1,0 +1,17 @@
+{
+  "id": "2026-01-15-sample-fragment",
+  "title": "Sample Fragment",
+  "summary": "A minimal, valid hand-made fragment used to test the Sphere Node end to end.",
+  "license": "CC-BY",
+  "access": {
+    "policy": "free"
+  },
+  "sources": [
+    {
+      "kind": "note",
+      "title": "Author's note",
+      "note": "Hand-written sample content, no external source."
+    }
+  ],
+  "relations": []
+}
