@@ -20,9 +20,9 @@ main = "src/platform/cloudflare/worker.ts"
 compatibility_date = "2025-09-01"
 
 [vars]
-SPHERE_PUBLISHER_NAME = "Mariano Viola"
+SPHERE_PUBLISHER_NAME = "Sphere"
 # Optional one-line tagline shown on the human-readable index page.
-SPHERE_PUBLISHER_SUMMARY = "SPHERE_PUBLISHER_SUMMARY"
+SPHERE_PUBLISHER_SUMMARY = "Agent-readable publishing, served by its own node"
 SPHERE_DEFAULT_LICENSE = "CC-BY-NC"
 
 # SPHERE_OWNER_TOKEN is a SECRET, never a var and never committed:
