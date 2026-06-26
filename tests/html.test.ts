@@ -194,6 +194,31 @@ describe("human routes via content negotiation", () => {
     expect(res.headers.get("content-type")).toContain("application/json");
   });
 
+  it("serves brand assets regardless of Accept, and links them in page <head>", async () => {
+    const deps = makeDeps();
+    seed(deps, freeManifest, "free body");
+
+    const favicon = await handleRequest(get("/favicon.svg"), deps, testCtx());
+    expect(favicon.status).toBe(200);
+    expect(favicon.headers.get("content-type")).toContain("image/svg+xml");
+
+    const og = await handleRequest(get("/og.png"), deps, testCtx());
+    expect(og.status).toBe(200);
+    expect(og.headers.get("content-type")).toContain("image/png");
+    const ogBytes = new Uint8Array(await og.arrayBuffer());
+    expect(ogBytes.byteLength).toBeGreaterThan(1000);
+    // PNG magic number — confirms we decoded real image bytes, not text.
+    expect(Array.from(ogBytes.slice(0, 4))).toEqual([0x89, 0x50, 0x4e, 0x47]);
+
+    const icon = await handleRequest(get("/icon.png"), deps, testCtx());
+    expect(icon.headers.get("content-type")).toContain("image/png");
+
+    const page = await (await handleRequest(htmlGet("/"), deps, testCtx())).text();
+    expect(page).toContain('rel="icon" type="image/svg+xml" href="/favicon.svg"');
+    expect(page).toContain('property="og:image" content="https://node.example/og.png"');
+    expect(page).toContain('name="twitter:card" content="summary_large_image"');
+  });
+
   it("serves an HTML 404 for an unknown fragment page", async () => {
     const deps = makeDeps();
     const res = await handleRequest(htmlGet("/fragments/nope"), deps, testCtx());

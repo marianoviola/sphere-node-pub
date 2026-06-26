@@ -30,6 +30,12 @@ import {
   kvStore,
   r2BlobStore,
 } from "./adapters.ts";
+import {
+  bytesFromBase64,
+  FAVICON_SVG,
+  ICON_PNG_BASE64,
+  OG_PNG_BASE64,
+} from "./assets.ts";
 
 const DISCOVERY_CACHE_KEY = "discovery:v1";
 const DISCOVERY_CACHE_TTL_SECONDS = 60;
@@ -77,6 +83,13 @@ function html(body: string, status = 200): Response {
   return new Response(body, {
     status,
     headers: { "content-type": "text/html; charset=utf-8" },
+  });
+}
+
+/** Serve a static brand asset with a day-long cache. */
+function asset(body: BodyInit, contentType: string): Response {
+  return new Response(body, {
+    headers: { "content-type": contentType, "cache-control": "public, max-age=86400" },
   });
 }
 
@@ -312,6 +325,14 @@ export async function handleRequest(
   if (contentMatch) {
     return handleContent(deps, ctx, request, decodeURIComponent(contentMatch[1]!));
   }
+
+  // Brand assets: favicon, raster icon, and the Open Graph banner. Served to
+  // any client regardless of Accept; they don't touch the machine contract and
+  // log no ledger events.
+  if (path === "/favicon.svg") return asset(FAVICON_SVG, "image/svg+xml; charset=utf-8");
+  if (path === "/icon.png") return asset(bytesFromBase64(ICON_PNG_BASE64), "image/png");
+  if (path === "/favicon.ico") return asset(bytesFromBase64(ICON_PNG_BASE64), "image/png");
+  if (path === "/og.png") return asset(bytesFromBase64(OG_PNG_BASE64), "image/png");
 
   // Human face. Only served when the client asks for HTML; otherwise these
   // paths fall through to the 404 they returned before, so the machine

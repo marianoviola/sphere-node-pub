@@ -398,6 +398,35 @@ function footer(license: string): string {
   </div>`;
 }
 
+// Favicon links + Open Graph / Twitter card tags for a page. og:image is the
+// shared brand banner served at /og.png (absolute when we know the host, so
+// social scrapers can fetch it); the title/description stay page-specific.
+function headMeta(chrome: SiteChrome, opts: { title: string; description?: string; path: string }): string {
+  const origin = chrome.host ? `https://${chrome.host}` : "";
+  const url = origin + opts.path;
+  const image = origin + "/og.png";
+  const desc = opts.description;
+  const tags = [
+    `<link rel="icon" type="image/svg+xml" href="/favicon.svg">`,
+    `<link rel="icon" type="image/png" sizes="256x256" href="/icon.png">`,
+    `<link rel="apple-touch-icon" href="/icon.png">`,
+    desc ? `<meta name="description" content="${escapeHtml(desc)}">` : "",
+    `<meta property="og:type" content="website">`,
+    `<meta property="og:site_name" content="${escapeHtml(chrome.publisherName)}">`,
+    `<meta property="og:title" content="${escapeHtml(opts.title)}">`,
+    desc ? `<meta property="og:description" content="${escapeHtml(desc)}">` : "",
+    origin ? `<meta property="og:url" content="${escapeHtml(url)}">` : "",
+    `<meta property="og:image" content="${escapeHtml(image)}">`,
+    `<meta property="og:image:width" content="1200">`,
+    `<meta property="og:image:height" content="630">`,
+    `<meta name="twitter:card" content="summary_large_image">`,
+    `<meta name="twitter:title" content="${escapeHtml(opts.title)}">`,
+    desc ? `<meta name="twitter:description" content="${escapeHtml(desc)}">` : "",
+    `<meta name="twitter:image" content="${escapeHtml(image)}">`,
+  ];
+  return tags.filter(Boolean).join("\n");
+}
+
 function layout(title: string, head: string, shell: string, scripts = ""): string {
   return `<!doctype html>
 <html lang="en">
@@ -469,7 +498,8 @@ export function renderIndexPage(chrome: SiteChrome, fragments: IndexFragmentView
     ${footer(license)}
   </div>`;
 
-  return layout(chrome.publisherName, "", card);
+  const head = headMeta(chrome, { title: chrome.publisherName, description: chrome.publisherSummary, path: "/" });
+  return layout(chrome.publisherName, head, card);
 }
 
 /** A single fragment reading page. */
@@ -533,7 +563,12 @@ export function renderFragmentPage(
     ${tail}
   </div>`;
 
-  return layout(`${manifest.title} — ${chrome.publisherName}`, "", card, scripts);
+  const pageHead = headMeta(chrome, {
+    title: manifest.title,
+    description: manifest.summary,
+    path,
+  });
+  return layout(`${manifest.title} — ${chrome.publisherName}`, pageHead, card, scripts);
 }
 
 /** The paid/metered gate. Honest by construction: shown, never charged in v1. */
@@ -581,5 +616,6 @@ export function renderNotFoundPage(chrome: SiteChrome, message: string): string 
     </div>
     ${footer(license)}
   </div>`;
-  return layout(`Not found — ${chrome.publisherName}`, "", card);
+  const head = headMeta(chrome, { title: `Not found — ${chrome.publisherName}`, description: chrome.publisherSummary, path: "/" });
+  return layout(`Not found — ${chrome.publisherName}`, head, card);
 }
