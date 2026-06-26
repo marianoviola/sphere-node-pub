@@ -229,6 +229,19 @@ article.fragment code {
   font-family: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82em;
 }
 article.fragment :not(pre) > code { background: var(--panel); padding: 0.1em 0.35em; border-radius: 4px; }
+article.fragment table { width: 100%; border-collapse: collapse; margin: 1.4em 0; font-size: 0.8em; }
+article.fragment th, article.fragment td {
+  text-align: left; padding: 0.55em 0.85em; border-bottom: 1px solid var(--hair); vertical-align: top;
+}
+article.fragment thead th {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-weight: 500; font-size: 0.92em;
+  letter-spacing: 0.02em; color: var(--meta); border-bottom: 1px solid var(--ink);
+}
+article.fragment tbody tr:last-child td { border-bottom: none; }
+article.fragment pre.mermaid {
+  background: none; border: 0; border-radius: 0; padding: 0; margin: 1.6em 0;
+  text-align: center; overflow-x: auto; line-height: 1.2; color: var(--ink);
+}
 .fade {
   position: absolute; left: 0; right: 0; bottom: 0; height: 120px;
   background: linear-gradient(to bottom, transparent, var(--bg));
@@ -280,6 +293,15 @@ article.fragment :not(pre) > code { background: var(--panel); padding: 0.1em 0.3
   .read-head h1 { font-size: 32px; }
 }
 `;
+
+// Loaded only on reading pages that actually contain a ```mermaid block. Module
+// scripts are deferred, so the DOM is ready by the time mermaid auto-renders the
+// <pre class="mermaid"> elements; the theme follows the reader's OS preference.
+const MERMAID_SCRIPT = `<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+mermaid.initialize({ startOnLoad: true, securityLevel: "strict", theme: dark ? "dark" : "neutral" });
+</script>`;
 
 const FONTS_HREF =
   "https://fonts.googleapis.com/css2?" +
@@ -376,7 +398,7 @@ function footer(license: string): string {
   </div>`;
 }
 
-function layout(title: string, head: string, shell: string): string {
+function layout(title: string, head: string, shell: string, scripts = ""): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -394,6 +416,7 @@ ${head}
 ${masthead()}
 ${shell}
 </div>
+${scripts}
 </body>
 </html>`;
 }
@@ -484,7 +507,9 @@ export function renderFragmentPage(
 
   const articleClass = gated ? "fragment is-gated" : "fragment";
   const fade = gated ? `<div class="fade"></div>` : "";
-  const article = `<article class="${articleClass}">${renderMarkdown(body.markdown)}${fade}</article>`;
+  const rendered = renderMarkdown(body.markdown);
+  const article = `<article class="${articleClass}">${rendered}${fade}</article>`;
+  const scripts = rendered.includes(`class="mermaid"`) ? MERMAID_SCRIPT : "";
 
   let tail: string;
   if (gated) {
@@ -508,7 +533,7 @@ export function renderFragmentPage(
     ${tail}
   </div>`;
 
-  return layout(`${manifest.title} — ${chrome.publisherName}`, "", card);
+  return layout(`${manifest.title} — ${chrome.publisherName}`, "", card, scripts);
 }
 
 /** The paid/metered gate. Honest by construction: shown, never charged in v1. */

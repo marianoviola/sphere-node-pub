@@ -53,6 +53,25 @@ describe("renderMarkdown", () => {
     expect(out).toContain('<pre><code class="language-js">const x = 1;</code></pre>');
   });
 
+  it("renders GFM pipe tables with alignment", () => {
+    const out = renderMarkdown(
+      "| Name | Score |\n| :--- | ----: |\n| Ada  | 9     |\n| Lin  | 12    |",
+    );
+    expect(out).toContain("<table>");
+    expect(out).toContain("<thead>");
+    expect(out).toContain('<th style="text-align:left">Name</th>');
+    expect(out).toContain('<th style="text-align:right">Score</th>');
+    expect(out).toContain('<td style="text-align:right">9</td>');
+    expect(out).toContain("<td style=\"text-align:left\">Lin</td>");
+  });
+
+  it("emits a mermaid block for client-side rendering, not a code block", () => {
+    const out = renderMarkdown("```mermaid\ngraph TD\n  A --> B\n```");
+    expect(out).toContain('<pre class="mermaid">');
+    expect(out).toContain("A --&gt; B"); // entity decodes to A --> B in textContent
+    expect(out).not.toContain("language-mermaid");
+  });
+
   it("escapes HTML and neutralizes dangerous URLs", () => {
     const out = renderMarkdown("<script>alert(1)</script>\n\n[x](javascript:alert(1))");
     expect(out).not.toContain("<script>");

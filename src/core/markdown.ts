@@ -4,7 +4,8 @@
 // runs on Workers). It covers exactly the `content.md` conventions the project
 // documents: an H1 title, `##`+ headings, paragraphs, bold/italic, inline code,
 // fenced code blocks with a language tag, links, images, ordered/unordered
-// lists, blockquotes, and horizontal rules. It is NOT a full CommonMark engine;
+// lists, blockquotes, horizontal rules, GFM pipe tables, and ```mermaid blocks
+// (emitted for client-side rendering). It is NOT a full CommonMark engine;
 // anything outside that subset degrades to escaped text rather than failing.
 //
 // Security: all text is HTML-escaped, and link/image URLs are scheme-checked so
@@ -88,6 +89,46 @@ function renderInline(raw: string): string {
   return parts.join("");
 }
 
+// --- GFM pipe tables ---------------------------------------------------------
+
+/** A delimiter row like `| --- | :--: |` that marks the line above as a header. */
+function isTableDelimiter(line: string): boolean {
+  const t = line.trim();
+  if (!t.includes("-")) return false;
+  const inner = t.replace(/^\|/, "").replace(/\|$/, "");
+  const cells = inner.split("|");
+  return cells.length > 0 && cells.every((c) => /^\s*:?-+:?\s*$/.test(c));
+}
+
+/** Split a table row into trimmed cells, honoring escaped `\|` pipes. */
+function splitRow(line: string): string[] {
+  const t = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  return t.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, "|").trim());
+}
+
+/** Column alignment from a delimiter cell (`:--`, `--:`, `:-:`). */
+function alignOf(cell: string): "left" | "right" | "center" | "" {
+  const c = cell.trim();
+  const left = c.startsWith(":");
+  const right = c.endsWith(":");
+  if (left && right) return "center";
+  if (right) return "right";
+  if (left) return "left";
+  return "";
+}
+
+function renderTable(header: string[], align: Array<ReturnType<typeof alignOf>>, rows: string[][]): string {
+  const cell = (tag: "th" | "td", text: string, a: string) => {
+    const style = a ? ` style="text-align:${a}"` : "";
+    return `<${tag}${style}>${renderInline(text)}</${tag}>`;
+  };
+  const head = `<tr>${header.map((h, k) => cell("th", h, align[k] ?? "")).join("")}</tr>`;
+  const body = rows
+    .map((r) => `<tr>${header.map((_, k) => cell("td", r[k] ?? "", align[k] ?? "")).join("")}</tr>`)
+    .join("");
+  return `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
 /**
  * Render a Markdown document to an HTML fragment string (no surrounding
  * document; the caller wraps it in a page template).
@@ -132,8 +173,16 @@ export function renderMarkdown(md: string): string {
         i++;
       }
       i++; // consume the closing fence
-      const cls = fence[1] ? ` class="language-${escapeHtml(fence[1])}"` : "";
-      blocks.push(`<pre><code${cls}>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+      const lang = fence[1];
+      if (lang === "mermaid") {
+        // Hand the raw diagram source to the client renderer. The entities decode
+        // back to the original characters in the element's textContent, which is
+        // what mermaid.js reads, so escaping stays safe for arrows like `-->`.
+        blocks.push(`<pre class="mermaid">${escapeHtml(codeLines.join("\n"))}</pre>`);
+      } else {
+        const cls = lang ? ` class="language-${escapeHtml(lang)}"` : "";
+        blocks.push(`<pre><code${cls}>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+      }
       continue;
     }
 
@@ -167,6 +216,21 @@ export function renderMarkdown(md: string): string {
         i++;
       }
       blocks.push(`<blockquote>${renderMarkdown(quote.join("\n"))}</blockquote>`);
+      continue;
+    }
+
+    // GFM pipe table: a header row immediately followed by a delimiter row.
+    if (line.includes("|") && i + 1 < lines.length && isTableDelimiter(lines[i + 1]!)) {
+      flushAll();
+      const header = splitRow(line);
+      const align = splitRow(lines[i + 1]!).map(alignOf);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i]!.includes("|") && !/^\s*$/.test(lines[i]!)) {
+        rows.push(splitRow(lines[i]!));
+        i++;
+      }
+      blocks.push(renderTable(header, align, rows));
       continue;
     }
 
