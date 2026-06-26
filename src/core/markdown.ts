@@ -11,6 +11,20 @@
 // `javascript:`/`data:` URLs cannot smuggle script into the page. Pure: no I/O,
 // no Cloudflare imports.
 
+/**
+ * Approximate word count of a Markdown body, for the human surface's meta lines
+ * ("1,240 w", "6 min read"). Fenced code and the common Markdown punctuation are
+ * stripped before counting so syntax doesn't inflate the number. Not exact, and
+ * not meant to be — it only drives a rounded reading estimate.
+ */
+export function countWords(md: string): number {
+  const text = md
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[#>*_`~\[\]()!|]/g, " ");
+  const words = text.trim().match(/\S+/g);
+  return words ? words.length : 0;
+}
+
 /** Escape the five HTML-significant characters. Safe for both text and attributes. */
 export function escapeHtml(s: string): string {
   return s

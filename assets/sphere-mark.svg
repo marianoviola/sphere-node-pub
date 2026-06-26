@@ -1,0 +1,17 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sphere">
+  <!-- Canonical Sphere mark: the single master identity for the node surface.
+       A glossy globe — radial highlight at upper-left, a meridian and an
+       equator ellipse, and a thin outer ring. Accent colour is mauve (#8a5a7d),
+       the shipped Direction A default. -->
+  <defs>
+    <radialGradient id="sphereMark" cx="33%" cy="27%" r="78%">
+      <stop offset="0%" stop-color="#f8f1f5"/>
+      <stop offset="47%" stop-color="#8a5a7d"/>
+      <stop offset="100%" stop-color="#3d2235"/>
+    </radialGradient>
+  </defs>
+  <circle cx="60" cy="60" r="59" fill="url(#sphereMark)"/>
+  <ellipse cx="60" cy="60" rx="21" ry="58" fill="none" stroke="#ffffff" stroke-opacity="0.34"/>
+  <ellipse cx="60" cy="60" rx="58" ry="21" fill="none" stroke="#ffffff" stroke-opacity="0.22"/>
+  <circle cx="60" cy="60" r="59" fill="none" stroke="#000000" stroke-opacity="0.14"/>
+</svg>

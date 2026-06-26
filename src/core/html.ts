@@ -1,8 +1,15 @@
-// Human-readable surface for the node. Pure functions: fragment/publisher data
-// (plus, for a reading page, the content string) in, a complete HTML document
-// out. No I/O and no Cloudflare imports — the platform layer loads the data and
-// calls these. This is the minimal reading template the future rich version
-// will extend (relations, media, richer previews); none of that ships now.
+// Human-readable surface for the node — "Direction A, Editorial Paper".
+//
+// Pure functions: fragment/publisher data (plus, for a reading page, the content
+// string) in, a complete HTML document out. No I/O and no Cloudflare imports —
+// the platform layer loads the data and calls these.
+//
+// This renders the warm, reading-first design: Newsreader serif for headings and
+// body, Spline Sans Mono for meta/labels/chips, a paper palette, and the glossy
+// Sphere mark. The machine signals (status line, policy chips, machine-readable
+// links) are kept quiet alongside the prose. The dormant payment seam is built
+// from the design but only appears for paid/metered fragments; today everything
+// is free, so it simply never renders. In v1 a gate is *shown*, never charged.
 
 import type { FragmentManifest } from "./types.ts";
 import { escapeHtml, renderMarkdown } from "./markdown.ts";
@@ -16,6 +23,10 @@ export const SPHERE_GETTING_STARTED_URL = "https://sphere.pub/docs/getting-start
 export interface SiteChrome {
   publisherName: string;
   publisherSummary?: string;
+  /** Node default license, shown in the index meta line and footer. */
+  defaultLicense?: string;
+  /** Request host (e.g. "quietfield.org"), shown quietly in the status line. */
+  host?: string;
 }
 
 /** One row in the index list. */
@@ -24,177 +35,526 @@ export interface IndexFragmentView {
   title: string;
   summary?: string;
   policy: string;
+  /** Word count of the fragment body, for the "NNN w · slug" meta line. */
+  words: number;
+  /** Last-updated timestamp (ms epoch), for the index "updated DATE" line. */
+  updatedTs: number;
 }
+
+/** Reading-page body data: the markdown plus the counts the chrome needs. */
+export interface FragmentBody {
+  /** Full content (free) or the bounded preview slice (gated). */
+  markdown: string;
+  gated: boolean;
+  /** Total words in the full content (drives "min read" and the gate counts). */
+  words: number;
+  /** Words shown in the preview (gated only). */
+  previewWords?: number;
+  /** Last-updated timestamp (ms epoch), for the dateline. */
+  updatedTs: number;
+}
+
+// --- Design tokens -----------------------------------------------------------
+// Direction A, Editorial Paper. Light ships first; the warm dark theme rides on
+// the reader's OS preference (the seam the design leaves open). The accent is a
+// single token — mauve is the shipped default; swap --accent to re-theme.
 
 const BASE_CSS = `
 :root {
-  --ink: #1b1b1a;
-  --muted: #6b6b66;
-  --line: #e6e4dd;
-  --bg: #fbfaf7;
-  --accent: #2f6f4f;
-  --link: #1f5fa8;
+  --bg: #f7f4ec;
+  --panel: #efe9dc;
+  --ink: #211d18;
+  --muted: #6b6258;
+  --hair: #e4ddcf;
+  --accent: #8a5a7d;
+  --accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
+  --eyebrow: #b09f86;
+  --meta: #a3987f;
+  --quote: #3a342b;
+  --chip: #fffdf7;
+  --ok: #4f7a52;
+  --ok-soft: #e8efe4;
+  --warn: #9a7a2e;
+  --warn-soft: #f1ebd8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1712;
+    --panel: #16120e;
+    --ink: #ece3d4;
+    --muted: #a59a87;
+    --hair: #352e25;
+    --accent-soft: color-mix(in srgb, var(--accent) 24%, transparent);
+    --eyebrow: #857a66;
+    --meta: #8c8270;
+    --quote: #ece3d4;
+    --chip: #221c16;
+    --ok: #86b083;
+    --ok-soft: #27301f;
+    --warn: #c9a559;
+    --warn-soft: #332a17;
+  }
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
+  min-height: 100vh;
   background: var(--bg);
   color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  line-height: 1.6;
+  font-family: Newsreader, Georgia, "Times New Roman", serif;
+  -webkit-font-smoothing: antialiased;
 }
-.wrap { max-width: 42rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
-a { color: var(--link); }
-header.site { border-bottom: 1px solid var(--line); }
-header.site .wrap { padding-bottom: 1.5rem; padding-top: 2rem; }
-.pub-name { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: 0.01em; }
-.pub-name a { color: var(--ink); text-decoration: none; }
-.pub-summary { color: var(--muted); margin: 0.35rem 0 0; font-size: 0.95rem; }
-h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 0.5rem; }
-.frag-list { list-style: none; margin: 1.5rem 0 0; padding: 0; }
-.frag-list li { padding: 1.1rem 0; border-bottom: 1px solid var(--line); }
-.frag-list a.title { font-size: 1.15rem; font-weight: 600; text-decoration: none; color: var(--ink); }
-.frag-list a.title:hover { color: var(--link); }
-.frag-list .summary { color: var(--muted); margin: 0.3rem 0 0; font-size: 0.95rem; }
-.badge {
-  display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.06em; padding: 0.12rem 0.5rem; border-radius: 999px; vertical-align: middle;
-  margin-left: 0.5rem; border: 1px solid var(--line);
+.shell { max-width: 900px; margin: 0 auto; padding: 26px 26px 90px; }
+.mono { font-family: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Masthead: the canonical mark, the wordmark, and a NODE micro-label. */
+.masthead { display: flex; align-items: center; gap: 11px; padding-bottom: 26px; }
+.orb { display: block; border-radius: 50%; flex: none; }
+.wordmark { display: flex; flex-direction: column; line-height: 1; }
+.wordmark .name { font-weight: 600; font-size: 21px; letter-spacing: -0.012em; }
+.wordmark .node {
+  font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-size: 9px; letter-spacing: 0.36em; color: var(--meta); margin-top: 4px;
 }
-.badge--free { color: var(--accent); border-color: #cfe6da; background: #f0f7f3; }
-.badge--paid { color: #8a5a16; border-color: #ecd8b6; background: #fbf4e6; }
-.badge--metered { color: #8a5a16; border-color: #ecd8b6; background: #fbf4e6; }
-.badge--sponsored { color: #5a4a8a; border-color: #ddd6ee; background: #f4f1fb; }
-article.fragment { font-family: Georgia, "Times New Roman", serif; }
-article.fragment h1, article.fragment h2, article.fragment h3 {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  line-height: 1.3;
+
+/* Page card. */
+.card {
+  background: var(--bg); border: 1px solid var(--hair); border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(20, 12, 4, 0.07); overflow: hidden;
 }
-article.fragment h2 { font-size: 1.35rem; margin-top: 2rem; }
-article.fragment h3 { font-size: 1.1rem; margin-top: 1.5rem; }
-article.fragment p { margin: 1rem 0; }
+.statusbar {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  padding: 11px 24px; background: var(--panel); border-bottom: 1px solid var(--hair);
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px;
+  letter-spacing: 0.02em; color: var(--meta);
+}
+.status--paid { color: var(--accent); }
+.status--metered { color: var(--warn); }
+.status--sponsored { color: var(--accent); }
+
+/* Status chip (policy). */
+.chip {
+  display: inline-block; font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.04em; padding: 3px 8px; border-radius: 3px;
+}
+.chip--free, .dot--free { color: var(--ok); }
+.chip--free { background: var(--ok-soft); }
+.chip--paid, .chip--sponsored, .dot--paid, .dot--sponsored { color: var(--accent); }
+.chip--paid, .chip--sponsored { background: var(--accent-soft); }
+.chip--metered, .dot--metered { color: var(--warn); }
+.chip--metered { background: var(--warn-soft); }
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.dot--free { background: var(--ok); }
+.dot--paid, .dot--sponsored { background: var(--accent); }
+.dot--metered { background: var(--warn); }
+
+/* Index: publisher header + fragment rows + footer. */
+.pub { padding: 40px 44px 30px; }
+.eyebrow {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 10px;
+  letter-spacing: 0.22em; color: var(--eyebrow); margin-bottom: 16px;
+}
+.pub h1 { margin: 0; font-weight: 500; font-size: 48px; line-height: 1.02; letter-spacing: -0.012em; }
+.pub-summary {
+  margin: 14px 0 0; font-size: 18px; line-height: 1.5; font-style: italic;
+  color: var(--muted); max-width: 30em;
+}
+.pub-meta {
+  margin-top: 20px; font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-size: 11px; letter-spacing: 0.02em; color: var(--meta);
+}
+.frag {
+  border-top: 1px solid var(--hair); display: flex; justify-content: space-between;
+  align-items: flex-start; gap: 24px; padding: 22px 44px; text-decoration: none; color: inherit;
+}
+a.frag:hover .frag-title { color: var(--accent); }
+.frag-head { display: flex; align-items: center; gap: 9px; }
+.frag-title { font-size: 22px; font-weight: 500; letter-spacing: -0.005em; transition: color 0.15s ease; }
+.frag-desc { margin: 5px 0 0 15px; font-size: 15px; line-height: 1.45; color: var(--muted); }
+.frag-right { text-align: right; flex: none; padding-top: 2px; }
+.frag-right .wc {
+  margin-top: 8px; font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-size: 11px; color: var(--meta);
+}
+.foot {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  padding: 16px 44px; background: var(--panel); border-top: 1px solid var(--hair);
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px;
+  letter-spacing: 0.02em; color: var(--meta);
+}
+.foot a { color: inherit; text-decoration: none; }
+.foot a:hover { color: var(--accent); }
+.foot .running { display: flex; align-items: center; gap: 8px; }
+
+/* Reading page. */
+.read-head { padding: 34px 64px 4px; }
+.back {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px;
+  letter-spacing: 0.04em; color: var(--accent); text-decoration: none;
+}
+.back:hover { text-decoration: underline; }
+.read-head h1 {
+  margin: 18px 0 0; font-weight: 500; font-size: 40px; line-height: 1.08;
+  letter-spacing: -0.014em; max-width: 14em;
+}
+.dek { margin: 14px 0 0; font-size: 18px; font-style: italic; line-height: 1.4; color: var(--muted); }
+.read-meta {
+  display: flex; align-items: center; gap: 14px; margin-top: 18px;
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px;
+  letter-spacing: 0.02em; color: var(--meta); flex-wrap: wrap;
+}
+.read-meta .chip { font-size: 11px; }
+.rule { height: 1px; background: var(--hair); margin: 26px 64px 0; }
+
+article.fragment { padding: 28px 64px 8px; font-size: 19px; line-height: 1.68; }
+article.fragment.is-gated { position: relative; padding-bottom: 0; }
+article.fragment p { margin: 0 0 1.1em; }
+article.fragment.is-gated p:last-of-type { margin-bottom: 0; }
+article.fragment h2 { font-weight: 600; font-size: 1.45em; line-height: 1.2; margin: 1.6em 0 0.5em; letter-spacing: -0.01em; }
+article.fragment h3 { font-weight: 600; font-size: 1.2em; line-height: 1.25; margin: 1.4em 0 0.4em; }
+article.fragment blockquote {
+  margin: 1.4em 0; padding: 4px 0 4px 24px; border-left: 2px solid var(--accent);
+  font-size: 25px; line-height: 1.32; font-style: italic; color: var(--quote);
+}
+article.fragment ul, article.fragment ol { margin: 1em 0; padding-left: 1.4em; }
+article.fragment li { margin: 0.3em 0; }
+article.fragment a { color: var(--accent); }
+article.fragment img { max-width: 100%; height: auto; border-radius: 4px; }
 article.fragment pre {
-  background: #f3f1ea; border: 1px solid var(--line); border-radius: 6px;
-  padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.9rem;
+  background: var(--panel); border: 1px solid var(--hair); border-radius: 6px;
+  padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.78em;
 }
 article.fragment code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.88em;
+  font-family: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82em;
 }
-article.fragment :not(pre) > code { background: #f3f1ea; padding: 0.1rem 0.35rem; border-radius: 4px; }
-article.fragment blockquote {
-  margin: 1rem 0; padding: 0.2rem 1rem; border-left: 3px solid var(--line); color: var(--muted);
+article.fragment :not(pre) > code { background: var(--panel); padding: 0.1em 0.35em; border-radius: 4px; }
+.fade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 120px;
+  background: linear-gradient(to bottom, transparent, var(--bg));
 }
-article.fragment img { max-width: 100%; height: auto; }
-.meta { color: var(--muted); font-size: 0.9rem; margin: 0 0 1.5rem; }
-.meta a { color: var(--muted); }
-.gate-note {
-  margin: 2rem 0 0; padding: 1rem 1.25rem; border: 1px solid var(--line);
-  border-radius: 8px; background: #fff; color: var(--muted); font-family: -apple-system, sans-serif;
-  font-size: 0.95rem;
+
+.license {
+  margin: 14px 64px 0; padding: 18px 0; border-top: 1px solid var(--hair);
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px; color: var(--meta);
 }
-.gate-note strong { color: var(--ink); }
-.back { display: inline-block; margin-bottom: 1.5rem; font-size: 0.9rem; text-decoration: none; }
-footer.site { border-top: 1px solid var(--line); margin-top: 3rem; }
-footer.site .wrap { padding-top: 1.5rem; padding-bottom: 2.5rem; color: var(--muted); font-size: 0.85rem; }
-footer.site a { color: var(--muted); }
+.license .code { color: var(--quote); }
+.machine-row {
+  display: flex; gap: 10px; padding: 0 64px 32px; flex-wrap: wrap;
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px;
+}
+.mchip {
+  color: var(--accent); border: 1px solid var(--hair); background: var(--chip);
+  padding: 6px 12px; border-radius: 4px; text-decoration: none;
+}
+.mchip:hover { border-color: var(--accent); }
+.mchip--note { color: var(--meta); margin-left: auto; }
+
+/* Gate panel (paid / metered). */
+.gate { margin: 0 64px 36px; padding: 22px 24px; background: var(--panel); border: 1px solid var(--hair); border-radius: 5px; }
+.gate-top { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.gate-title { font-size: 17px; font-weight: 500; color: var(--quote); }
+.gate-price { font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 13px; color: var(--accent); white-space: nowrap; }
+.gate p { margin: 8px 0 0; font-size: 15px; line-height: 1.5; color: var(--muted); max-width: 42em; }
+.gate p .file { font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 12px; color: var(--meta); }
+.gate-actions { display: flex; align-items: center; gap: 14px; margin-top: 16px; flex-wrap: wrap; }
+.gate-unlock {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 12px; color: var(--meta);
+  background: var(--chip); border: 1px solid var(--hair); padding: 9px 18px; border-radius: 5px;
+}
+.gate-note { font-size: 13.5px; font-style: italic; color: var(--meta); }
+
+/* Browser 404. */
+.notfound { padding: 40px 44px; }
+.notfound h1 { margin: 0 0 0.5rem; font-weight: 500; font-size: 36px; letter-spacing: -0.012em; }
+.notfound p { margin: 0 0 1.2rem; color: var(--muted); font-size: 17px; }
+
+@media (max-width: 640px) {
+  .pub, .frag, .foot { padding-left: 22px; padding-right: 22px; }
+  .read-head, .rule, article.fragment, .license, .machine-row, .gate { margin-left: 0; }
+  .read-head, article.fragment { padding-left: 24px; padding-right: 24px; }
+  .rule, .license { margin-left: 24px; margin-right: 24px; }
+  .machine-row, .gate { padding-left: 24px; padding-right: 24px; }
+  .gate { margin-left: 24px; margin-right: 24px; }
+  .pub h1 { font-size: 38px; }
+  .read-head h1 { font-size: 32px; }
+}
 `;
 
-const POLICY_LABELS: Record<string, string> = {
-  free: "Free",
-  paid: "Paid",
-  metered: "Metered",
-  sponsored: "Sponsored",
+const FONTS_HREF =
+  "https://fonts.googleapis.com/css2?" +
+  "family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400" +
+  "&family=Spline+Sans+Mono:wght@400;500&display=swap";
+
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** "Jun 24, 2026" in UTC, so output is stable regardless of server timezone. */
+function formatDate(ts: number): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+}
+
+/** Thousands separators: 2980 -> "2,980". */
+function commas(n: number): string {
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/** Reading estimate at ~200 wpm, at least one minute. */
+function minutes(words: number): number {
+  return Math.max(1, Math.round(words / 200));
+}
+
+// Human glosses for the standard licenses we expect. Anything unknown renders as
+// just the license code — we never invent a description for a license we can't name.
+const LICENSE_GLOSS: Record<string, string> = {
+  "CC-BY": "share & adapt with attribution",
+  "CC-BY-4.0": "share & adapt with attribution",
+  "CC BY 4.0": "share & adapt with attribution",
+  "CC-BY-NC": "share & adapt, non-commercial, with attribution",
+  "CC-BY-NC-4.0": "share & adapt, non-commercial, with attribution",
+  "CC-BY-SA": "share & adapt, share-alike, with attribution",
+  "CC-BY-ND": "share with attribution, no derivatives",
+  "CC0": "no rights reserved",
+  "CC0-1.0": "no rights reserved",
 };
 
-function badge(policy: string): string {
-  const label = POLICY_LABELS[policy] ?? policy;
-  const cls = POLICY_LABELS[policy] ? policy : "free";
-  return `<span class="badge badge--${cls}">${escapeHtml(label)}</span>`;
+const POLICY_LABELS: Record<string, string> = {
+  free: "FREE",
+  paid: "PAID",
+  metered: "METERED",
+  sponsored: "SPONSORED",
+};
+
+/** CSS modifier suffix for a policy's colors (unknown policies read as free). */
+function policyClass(policy: string): string {
+  return policy in POLICY_LABELS ? policy : "free";
 }
 
-function header(chrome: SiteChrome): string {
-  const summary = chrome.publisherSummary
-    ? `<p class="pub-summary">${escapeHtml(chrome.publisherSummary)}</p>`
-    : "";
-  return `<header class="site"><div class="wrap">
-    <p class="pub-name"><a href="/">${escapeHtml(chrome.publisherName)}</a></p>
-    ${summary}
-  </div></header>`;
+/** Whole-dollar when round ("$2"), else two decimals ("$0.05"). */
+function priceCompact(price: number): string {
+  return Number.isInteger(price) ? `$${price}` : `$${price.toFixed(2)}`;
 }
 
-function footer(): string {
-  return `<footer class="site"><div class="wrap">
-    Published with <a href="${SPHERE_PROJECT_URL}">Sphere</a> &middot;
-    <a href="${SPHERE_GETTING_STARTED_URL}">Run your own node</a>
-  </div></footer>`;
+/** A policy chip: "FREE", "PAID · $2", "METERED". Price shown for paid only. */
+function policyChip(policy: string, price?: number): string {
+  const cls = policyClass(policy);
+  let label = POLICY_LABELS[cls] ?? "FREE";
+  if (policy === "paid" && typeof price === "number" && price > 0) {
+    label = `${label} · ${priceCompact(price)}`;
+  }
+  return `<span class="chip chip--${cls}">${escapeHtml(label)}</span>`;
 }
 
-function layout(title: string, chrome: SiteChrome, main: string): string {
+/** The glossy Sphere mark, inlined as SVG at the given pixel size. */
+function sphereMark(px: number, gradId: string): string {
+  return `<svg class="orb" width="${px}" height="${px}" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+<defs><radialGradient id="${gradId}" cx="33%" cy="27%" r="78%">
+<stop offset="0%" stop-color="#f8f1f5"/><stop offset="47%" stop-color="#8a5a7d"/><stop offset="100%" stop-color="#3d2235"/>
+</radialGradient></defs>
+<circle cx="60" cy="60" r="59" fill="url(#${gradId})"/>
+<ellipse cx="60" cy="60" rx="21" ry="58" fill="none" stroke="#ffffff" stroke-opacity="0.34"/>
+<ellipse cx="60" cy="60" rx="58" ry="21" fill="none" stroke="#ffffff" stroke-opacity="0.22"/>
+<circle cx="60" cy="60" r="59" fill="none" stroke="#000000" stroke-opacity="0.14"/>
+</svg>`;
+}
+
+function masthead(): string {
+  return `<div class="masthead">
+    ${sphereMark(30, "mk-top")}
+    <div class="wordmark"><span class="name">Sphere</span><span class="node">NODE</span></div>
+  </div>`;
+}
+
+function footer(license: string): string {
+  return `<div class="foot">
+    <span class="running">${sphereMark(13, "mk-foot")}<a href="${SPHERE_PROJECT_URL}">running on Sphere</a></span>
+    <span>Apache-2.0 node · ${escapeHtml(license)} content</span>
+  </div>`;
+}
+
+function layout(title: string, head: string, shell: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="${FONTS_HREF}">
 <style>${BASE_CSS}</style>
+${head}
 </head>
 <body>
-${header(chrome)}
-<main class="wrap">
-${main}
-</main>
-${footer()}
+<div class="shell">
+${masthead()}
+${shell}
+</div>
 </body>
 </html>`;
 }
 
-/** The publisher index: summary plus a list of fragments. */
+/** The publisher index: header, fragment list, footer. */
 export function renderIndexPage(chrome: SiteChrome, fragments: IndexFragmentView[]): string {
-  const list = fragments.length
-    ? `<ul class="frag-list">${fragments
-        .map((f) => {
-          const summary = f.summary
-            ? `<p class="summary">${escapeHtml(f.summary)}</p>`
-            : "";
-          return `<li>
-            <a class="title" href="/fragments/${encodeURIComponent(f.id)}">${escapeHtml(f.title)}</a>${badge(f.policy)}
-            ${summary}
-          </li>`;
-        })
-        .join("")}</ul>`
-    : `<p class="meta">No fragments published yet.</p>`;
+  const license = chrome.defaultLicense ?? "CC-BY";
+  const host = chrome.host ? escapeHtml(chrome.host) : "/";
 
-  const main = `<h1>Fragments</h1>${list}`;
-  return layout(chrome.publisherName, chrome, main);
+  const summary = chrome.publisherSummary
+    ? `<p class="pub-summary">${escapeHtml(chrome.publisherSummary)}</p>`
+    : "";
+
+  const latest = fragments.reduce((m, f) => Math.max(m, f.updatedTs || 0), 0);
+  const count = `${fragments.length} ${fragments.length === 1 ? "fragment" : "fragments"}`;
+  const updated = latest ? `&nbsp;&nbsp;·&nbsp;&nbsp;updated ${escapeHtml(formatDate(latest))}` : "";
+  const pubMeta = `${count}&nbsp;&nbsp;·&nbsp;&nbsp;${escapeHtml(license)}${updated}`;
+
+  const rows = fragments.length
+    ? fragments
+        .map((f) => {
+          const cls = policyClass(f.policy);
+          const price = undefined; // index has no per-fragment price wired today
+          const desc = f.summary
+            ? `<div class="frag-desc">${escapeHtml(f.summary)}</div>`
+            : "";
+          return `<a class="frag" href="/fragments/${encodeURIComponent(f.id)}">
+        <div style="flex:1">
+          <div class="frag-head"><span class="dot dot--${cls}"></span><span class="frag-title">${escapeHtml(f.title)}</span></div>
+          ${desc}
+        </div>
+        <div class="frag-right">
+          ${policyChip(f.policy, price)}
+          <div class="wc">${commas(f.words)}&nbsp;w&nbsp;·&nbsp;${escapeHtml(f.id)}</div>
+        </div>
+      </a>`;
+        })
+        .join("")
+    : `<div class="frag"><div class="frag-desc" style="margin-left:0">No fragments published yet.</div></div>`;
+
+  const card = `<div class="card">
+    <div class="statusbar"><span>${host}</span><span>GET /&nbsp;&nbsp;·&nbsp;&nbsp;200 text/html</span></div>
+    <div class="pub">
+      <div class="eyebrow">PUBLISHER</div>
+      <h1>${escapeHtml(chrome.publisherName)}</h1>
+      ${summary}
+      <div class="pub-meta">${pubMeta}</div>
+    </div>
+    ${rows}
+    ${footer(license)}
+  </div>`;
+
+  return layout(chrome.publisherName, "", card);
 }
 
-/** A single fragment reading page. `markdown` is full content (free) or the preview slice (gated). */
+/** A single fragment reading page. */
 export function renderFragmentPage(
   chrome: SiteChrome,
   manifest: FragmentManifest,
-  body: { markdown: string; gated: boolean },
+  body: FragmentBody,
 ): string {
-  const meta = `<p class="meta">${escapeHtml(manifest.license)} ${badge(manifest.access.policy)}</p>`;
-  const summary = manifest.summary ? `<p class="meta">${escapeHtml(manifest.summary)}</p>` : "";
-  const content = `<article class="fragment">${renderMarkdown(body.markdown)}</article>`;
-  const gate = body.gated
-    ? `<p class="gate-note"><strong>This is a preview.</strong> The full fragment is
-       available under a ${escapeHtml(manifest.access.policy)} access policy and is served
-       to agents that complete the payment challenge at
-       <code>/fragments/${escapeHtml(manifest.id)}/content.md</code>.</p>`
-    : "";
+  const policy = manifest.access.policy;
+  const cls = policyClass(policy);
+  const gated = body.gated;
+  const license = manifest.license;
+  const price = manifest.access.price_per_access;
+  const path = `/fragments/${manifest.id}`;
+  const url = chrome.host ? `${escapeHtml(chrome.host)}${escapeHtml(path)}` : escapeHtml(path);
 
-  const main = `<a class="back" href="/">&larr; All fragments</a>
+  const machineCode = policy === "free" || policy === "sponsored" ? 200 : 402;
+  const statusClass = gated || policy === "sponsored" ? ` status--${cls}` : "";
+  const statusBar = `<div class="statusbar"><span>${url}</span><span class="${statusClass.trim()}">${machineCode} · ${escapeHtml(policy)}</span></div>`;
+
+  const dek = manifest.summary ? `<p class="dek">${escapeHtml(manifest.summary)}</p>` : "";
+  const date = body.updatedTs ? `<span>${escapeHtml(formatDate(body.updatedTs))}</span><span>·</span>` : "";
+  const readMeta = `<div class="read-meta">
+      ${policyChip(policy, price)}
+      ${date}<span>${minutes(body.words)} min read</span><span>·</span><span>${escapeHtml(license)}</span>
+    </div>`;
+
+  const head = `<div class="read-head">
+    <a class="back" href="/">← ${escapeHtml(chrome.publisherName)}</a>
     <h1>${escapeHtml(manifest.title)}</h1>
-    ${summary}${meta}${content}${gate}`;
-  return layout(`${manifest.title} — ${chrome.publisherName}`, chrome, main);
+    ${dek}
+    ${readMeta}
+  </div>
+  <div class="rule"></div>`;
+
+  const articleClass = gated ? "fragment is-gated" : "fragment";
+  const fade = gated ? `<div class="fade"></div>` : "";
+  const article = `<article class="${articleClass}">${renderMarkdown(body.markdown)}${fade}</article>`;
+
+  let tail: string;
+  if (gated) {
+    tail = gatePanel(policy, price, body.previewWords ?? 0, body.words);
+  } else {
+    const gloss = LICENSE_GLOSS[license];
+    const glossPart = gloss ? ` — ${escapeHtml(gloss)}` : "";
+    const licenseLine = `<div class="license"><span class="code">${escapeHtml(license)}</span>${glossPart}</div>`;
+    const machineRow = `<div class="machine-row">
+      <a class="mchip" href="${escapeHtml(path)}/sphere.json">sphere.json</a>
+      <a class="mchip" href="${escapeHtml(path)}/content.md">content.md</a>
+      <span class="mchip mchip--note">↑ machine-readable</span>
+    </div>`;
+    tail = licenseLine + machineRow;
+  }
+
+  const card = `<div class="card">
+    ${statusBar}
+    ${head}
+    ${article}
+    ${tail}
+  </div>`;
+
+  return layout(`${manifest.title} — ${chrome.publisherName}`, "", card);
+}
+
+/** The paid/metered gate. Honest by construction: shown, never charged in v1. */
+function gatePanel(policy: string, price: number | undefined, previewWords: number, totalWords: number): string {
+  const metered = policy === "metered";
+  const title = metered ? "The rest of this fragment is metered." : "The rest of this fragment is paid.";
+  const hasPrice = typeof price === "number" && price > 0;
+
+  const priceTag = hasPrice
+    ? `<div class="gate-price">$${price.toFixed(2)} / read</div>`
+    : metered
+      ? `<div class="gate-price">metered</div>`
+      : "";
+
+  const counts = totalWords
+    ? `roughly the first ${commas(previewWords)} of ${commas(totalWords)} words`
+    : "the free preview";
+
+  const unlock = hasPrice
+    ? `Unlock — $${price.toFixed(2)}&nbsp;&nbsp;·&nbsp;&nbsp;coming soon`
+    : `Unlock&nbsp;&nbsp;·&nbsp;&nbsp;coming soon`;
+
+  return `<div class="gate">
+    <div class="gate-top">
+      <div class="gate-title">${escapeHtml(title)}</div>
+      ${priceTag}
+    </div>
+    <p>You've read ${counts}. Unlocking returns the full <span class="file">content.md</span> and lifts the gate for agents acting on your behalf.</p>
+    <div class="gate-actions">
+      <span class="gate-unlock">${unlock}</span>
+      <span class="gate-note">Payment isn't wired up yet — in v1 the 402 is returned, not charged.</span>
+    </div>
+  </div>`;
 }
 
 /** A browser-friendly 404 so a human never sees a raw JSON error. */
 export function renderNotFoundPage(chrome: SiteChrome, message: string): string {
-  const main = `<h1>Not found</h1><p class="meta">${escapeHtml(message)}</p>
-    <a class="back" href="/">&larr; All fragments</a>`;
-  return layout(`Not found — ${chrome.publisherName}`, chrome, main);
+  const license = chrome.defaultLicense ?? "CC-BY";
+  const card = `<div class="card">
+    <div class="statusbar"><span>${chrome.host ? escapeHtml(chrome.host) : "/"}</span><span>404 not found</span></div>
+    <div class="notfound">
+      <h1>Not found</h1>
+      <p>${escapeHtml(message)}</p>
+      <a class="back" href="/">← ${escapeHtml(chrome.publisherName)}</a>
+    </div>
+    ${footer(license)}
+  </div>`;
+  return layout(`Not found — ${chrome.publisherName}`, "", card);
 }

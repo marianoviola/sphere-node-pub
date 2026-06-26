@@ -62,38 +62,65 @@ describe("renderMarkdown", () => {
 });
 
 describe("renderIndexPage", () => {
-  it("shows publisher, fragments, badges, and Sphere credit", () => {
+  it("shows publisher, fragments, policy chips, meta lines, and the Sphere credit", () => {
     const out = renderIndexPage(
-      { publisherName: "Acme Press", publisherSummary: "We publish things." },
+      {
+        publisherName: "Acme Press",
+        publisherSummary: "We publish things.",
+        defaultLicense: "CC-BY-NC",
+        host: "acme.example",
+      },
       [
-        { id: "2026-01-15-free", title: "Free Fragment", summary: "Free summary.", policy: "free" },
-        { id: "2026-01-16-paid", title: "Paid Fragment", policy: "paid" },
+        { id: "2026-01-15-free", title: "Free Fragment", summary: "Free summary.", policy: "free", words: 1240, updatedTs: Date.UTC(2026, 5, 24) },
+        { id: "2026-01-16-paid", title: "Paid Fragment", policy: "paid", words: 2980, updatedTs: Date.UTC(2026, 5, 21) },
       ],
     );
     expect(out).toContain("Acme Press");
+    expect(out).toContain("PUBLISHER");
     expect(out).toContain("We publish things.");
     expect(out).toContain('href="/fragments/2026-01-15-free"');
-    expect(out).toContain("badge--free");
-    expect(out).toContain("badge--paid");
+    expect(out).toContain("chip--free");
+    expect(out).toContain("chip--paid");
+    expect(out).toContain("CC-BY-NC"); // node default license, not invented
+    expect(out).toContain("2 fragments");
+    expect(out).toContain("updated Jun 24, 2026"); // latest fragment date
+    expect(out).toContain("1,240&nbsp;w&nbsp;·&nbsp;2026-01-15-free");
+    expect(out).toContain("running on Sphere");
     expect(out).toContain("https://sphere.pub");
   });
 });
 
 describe("renderFragmentPage", () => {
-  it("renders full content for free and a gate note for gated", () => {
-    const free = renderFragmentPage({ publisherName: "Acme" }, freeManifest, {
+  it("renders full content, license line, and machine chips for a free fragment", () => {
+    const free = renderFragmentPage({ publisherName: "Acme", host: "acme.example" }, freeManifest, {
       markdown: "## Body\n\nfull text here",
       gated: false,
+      words: 3,
+      updatedTs: Date.UTC(2026, 5, 24),
     });
     expect(free).toContain("full text here");
-    expect(free).not.toContain("This is a preview");
+    expect(free).toContain("200 · free"); // honest machine status
+    expect(free).toContain("CC-BY"); // real fragment license
+    expect(free).toContain("/fragments/2026-01-15-free/sphere.json");
+    expect(free).toContain("/fragments/2026-01-15-free/content.md");
+    expect(free).toContain("↑ machine-readable");
+    expect(free).not.toContain("The rest of this fragment is paid");
+  });
 
-    const gated = renderFragmentPage({ publisherName: "Acme" }, paidManifest, {
+  it("renders the preview and the honest, not-charged gate for a paid fragment", () => {
+    const gated = renderFragmentPage({ publisherName: "Acme", host: "acme.example" }, paidManifest, {
       markdown: "SECRET CONTE",
       gated: true,
+      words: 100,
+      previewWords: 2,
+      updatedTs: Date.UTC(2026, 5, 21),
     });
-    expect(gated).toContain("gate-note");
-    expect(gated).toContain("This is a preview");
+    expect(gated).toContain("SECRET CONTE");
+    expect(gated).toContain("402 · paid"); // honest machine status
+    expect(gated).toContain("class=\"gate\"");
+    expect(gated).toContain("The rest of this fragment is paid");
+    expect(gated).toContain("$0.05 / read");
+    expect(gated).toContain("returned, not charged");
   });
 });
 
@@ -124,7 +151,7 @@ describe("human routes via content negotiation", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     const body = await res.text();
     expect(body).toContain("The whole body is here.");
-    expect(body).not.toContain("This is a preview");
+    expect(body).not.toContain("The rest of this fragment is paid");
   });
 
   it("renders a gated fragment as a preview, never a 402 or the full body", async () => {
@@ -135,7 +162,8 @@ describe("human routes via content negotiation", () => {
     const body = await res.text();
     expect(body).toContain("SECRET CONTE"); // first 12 chars
     expect(body).not.toContain("long enough to be truncated");
-    expect(body).toContain("This is a preview");
+    expect(body).toContain("The rest of this fragment is paid");
+    expect(body).toContain("returned, not charged");
   });
 
   it("does not leak the human surface into the machine content route", async () => {

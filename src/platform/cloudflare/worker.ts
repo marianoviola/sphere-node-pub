@@ -8,6 +8,7 @@
 import { buildDiscovery } from "../../core/discovery.ts";
 import { DEFAULT_PREVIEW_CHARS, gateContent } from "../../core/gate.ts";
 import { getContent } from "../../core/fragments.ts";
+import { countWords } from "../../core/markdown.ts";
 import {
   renderFragmentPage,
   renderIndexPage,
@@ -84,8 +85,13 @@ function wantsHtml(request: Request): boolean {
   return (request.headers.get("accept") ?? "").includes("text/html");
 }
 
-function chromeFor(deps: Deps): SiteChrome {
-  return { publisherName: deps.config.publisherName, publisherSummary: deps.config.publisherSummary };
+function chromeFor(deps: Deps, request: Request): SiteChrome {
+  return {
+    publisherName: deps.config.publisherName,
+    publisherSummary: deps.config.publisherSummary,
+    defaultLicense: deps.config.defaultLicense,
+    host: new URL(request.url).host,
+  };
 }
 
 function logEvent(
@@ -170,13 +176,22 @@ async function handleHumanIndex(deps: Deps, ctx: RequestContext, request: Reques
   logEvent(deps, ctx, request, null, "discovery");
 
   const fragments = await deps.fragments.list();
-  const views = fragments.map((f) => ({
-    id: f.manifest.id,
-    title: f.manifest.title,
-    summary: typeof f.manifest.summary === "string" ? f.manifest.summary : undefined,
-    policy: f.manifest.access.policy,
-  }));
-  return html(renderIndexPage(chromeFor(deps), views));
+  // The index meta line shows each fragment's word count, so load the bodies
+  // (in parallel) to count them. Small N; the discovery doc is cached separately.
+  const views = await Promise.all(
+    fragments.map(async (f) => {
+      const content = await getContent(deps.blobs, f);
+      return {
+        id: f.manifest.id,
+        title: f.manifest.title,
+        summary: typeof f.manifest.summary === "string" ? f.manifest.summary : undefined,
+        policy: f.manifest.access.policy,
+        words: content ? countWords(content) : 0,
+        updatedTs: f.updatedTs,
+      };
+    }),
+  );
+  return html(renderIndexPage(chromeFor(deps, request), views));
 }
 
 async function handleHumanFragment(
@@ -187,25 +202,38 @@ async function handleHumanFragment(
 ): Promise<Response> {
   const fragment = await deps.fragments.get(id);
   if (!fragment) {
-    return html(renderNotFoundPage(chromeFor(deps), `No fragment "${id}".`), 404);
+    return html(renderNotFoundPage(chromeFor(deps, request), `No fragment "${id}".`), 404);
   }
 
   const content = await getContent(deps.blobs, fragment);
   if (content === null) {
-    return html(renderNotFoundPage(chromeFor(deps), `No content for "${id}".`), 404);
+    return html(renderNotFoundPage(chromeFor(deps, request), `No content for "${id}".`), 404);
   }
 
   const policy = fragment.manifest.access.policy;
   const gated = policy === "paid" || policy === "metered";
+  // Total word count comes from the full body; the page only ever shows the
+  // preview slice for a gated fragment, but the counts stay honest.
+  const totalWords = countWords(content);
   let markdown = content;
+  let previewWords: number | undefined;
   if (gated) {
     const previewChars = fragment.manifest.access.preview_chars ?? DEFAULT_PREVIEW_CHARS;
     markdown = content.slice(0, Math.max(0, previewChars));
+    previewWords = countWords(markdown);
   }
 
   // A human page never completes payment: a gated view is a preview-only read.
   logEvent(deps, ctx, request, id, gated ? "preview" : "access");
-  return html(renderFragmentPage(chromeFor(deps), fragment.manifest, { markdown, gated }));
+  return html(
+    renderFragmentPage(chromeFor(deps, request), fragment.manifest, {
+      markdown,
+      gated,
+      words: totalWords,
+      previewWords,
+      updatedTs: fragment.updatedTs,
+    }),
+  );
 }
 
 function isOwner(deps: Deps, request: Request): boolean {
