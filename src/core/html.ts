@@ -124,11 +124,12 @@ body {
   box-shadow: 0 1px 4px rgba(20, 12, 4, 0.07); overflow: hidden;
 }
 .statusbar {
-  display: flex; justify-content: space-between; align-items: center; gap: 16px;
-  padding: 11px 24px; background: var(--panel); border-bottom: 1px solid var(--hair);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px 16px;
+  flex-wrap: wrap; padding: 11px 24px; background: var(--panel); border-bottom: 1px solid var(--hair);
   font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px;
   letter-spacing: 0.02em; color: var(--meta);
 }
+.statusbar span { overflow-wrap: anywhere; min-width: 0; }
 .status--paid { color: var(--accent); }
 .status--metered { color: var(--warn); }
 .status--sponsored { color: var(--accent); }
@@ -155,14 +156,14 @@ body {
   font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 10px;
   letter-spacing: 0.22em; color: var(--eyebrow); margin-bottom: 16px;
 }
-.pub h1 { margin: 0; font-weight: 500; font-size: 48px; line-height: 1.02; letter-spacing: -0.012em; }
+.pub h1 { margin: 0; font-weight: 500; font-size: clamp(2rem, 8vw, 48px); line-height: 1.04; letter-spacing: -0.012em; }
 .pub-summary {
   margin: 14px 0 0; font-size: 18px; line-height: 1.5; font-style: italic;
   color: var(--muted); max-width: 30em;
 }
 .pub-meta {
   margin-top: 20px; font-family: "Spline Sans Mono", ui-monospace, monospace;
-  font-size: 11px; letter-spacing: 0.02em; color: var(--meta);
+  font-size: 11px; letter-spacing: 0.02em; color: var(--meta); overflow-wrap: anywhere;
 }
 .frag {
   border-top: 1px solid var(--hair); display: flex; justify-content: space-between;
@@ -175,7 +176,7 @@ a.frag:hover .frag-title { color: var(--accent); }
 .frag-right { text-align: right; flex: none; padding-top: 2px; }
 .frag-right .wc {
   margin-top: 8px; font-family: "Spline Sans Mono", ui-monospace, monospace;
-  font-size: 11px; color: var(--meta);
+  font-size: 11px; color: var(--meta); overflow-wrap: anywhere;
 }
 .foot {
   display: flex; justify-content: space-between; align-items: center; gap: 16px;
@@ -195,8 +196,8 @@ a.frag:hover .frag-title { color: var(--accent); }
 }
 .back:hover { text-decoration: underline; }
 .read-head h1 {
-  margin: 18px 0 0; font-weight: 500; font-size: 40px; line-height: 1.08;
-  letter-spacing: -0.014em; max-width: 14em;
+  margin: 18px 0 0; font-weight: 500; font-size: clamp(1.75rem, 7vw, 40px); line-height: 1.1;
+  letter-spacing: -0.014em; max-width: 14em; overflow-wrap: anywhere;
 }
 .dek { margin: 14px 0 0; font-size: 18px; font-style: italic; line-height: 1.4; color: var(--muted); }
 .read-meta {
@@ -279,18 +280,38 @@ article.fragment pre.mermaid {
 
 /* Browser 404. */
 .notfound { padding: 40px 44px; }
-.notfound h1 { margin: 0 0 0.5rem; font-weight: 500; font-size: 36px; letter-spacing: -0.012em; }
+.notfound h1 { margin: 0 0 0.5rem; font-weight: 500; font-size: clamp(1.6rem, 6vw, 36px); letter-spacing: -0.012em; }
 .notfound p { margin: 0 0 1.2rem; color: var(--muted); font-size: 17px; }
 
 @media (max-width: 640px) {
-  .pub, .frag, .foot { padding-left: 22px; padding-right: 22px; }
-  .read-head, .rule, article.fragment, .license, .machine-row, .gate { margin-left: 0; }
-  .read-head, article.fragment { padding-left: 24px; padding-right: 24px; }
-  .rule, .license { margin-left: 24px; margin-right: 24px; }
-  .machine-row, .gate { padding-left: 24px; padding-right: 24px; }
-  .gate { margin-left: 24px; margin-right: 24px; }
-  .pub h1 { font-size: 38px; }
-  .read-head h1 { font-size: 32px; }
+  .shell { padding: 18px 14px 72px; }
+
+  /* Tighter horizontal padding so the prose and rows use the full width. */
+  .statusbar { padding: 11px 18px; }
+  .pub { padding: 30px 22px 24px; }
+  .foot { padding: 16px 22px; flex-wrap: wrap; gap: 6px 16px; }
+  .read-head { padding: 28px 22px 4px; }
+  .rule, .license { margin-left: 22px; margin-right: 22px; }
+  .machine-row { padding: 0 22px 28px; }
+  .gate { margin: 0 22px 28px; }
+  .notfound { padding: 30px 22px; }
+
+  /* Index rows: stack the meta (chip + word-count/slug) below the title so the
+     two columns never collide on a narrow screen. */
+  .frag { flex-direction: column; gap: 10px; padding: 18px 22px; }
+  .frag-head { align-items: flex-start; }
+  .frag-head .dot { margin-top: 9px; }
+  .frag-right { text-align: left; padding-top: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; }
+  .frag-right .wc { margin-top: 0; }
+
+  /* Comfortable reading size and a lighter blockquote on small screens. */
+  article.fragment { padding: 24px 22px 8px; font-size: 17px; line-height: 1.62; }
+  article.fragment blockquote { font-size: 20px; padding-left: 16px; }
+  .gate-top { flex-wrap: wrap; }
+
+  /* Tap targets: comfortably ~40px tall on touch. */
+  .mchip, .gate-unlock { min-height: 40px; display: inline-flex; align-items: center; }
+  .back { display: inline-flex; align-items: center; min-height: 36px; }
 }
 `;
 

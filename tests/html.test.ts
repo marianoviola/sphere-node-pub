@@ -107,6 +107,15 @@ describe("renderIndexPage", () => {
     expect(out).toContain("running on Sphere");
     expect(out).toContain("https://sphere.pub");
   });
+
+  it("is mobile-responsive: viewport meta and a stacking breakpoint", () => {
+    const out = renderIndexPage({ publisherName: "Acme Press" }, [
+      { id: "x", title: "X", policy: "free", words: 10, updatedTs: Date.UTC(2026, 0, 1) },
+    ]);
+    expect(out).toContain('name="viewport" content="width=device-width, initial-scale=1"');
+    expect(out).toContain("@media (max-width: 640px)");
+    expect(out).toContain("flex-direction: column"); // index rows stack on mobile
+  });
 });
 
 describe("renderFragmentPage", () => {
