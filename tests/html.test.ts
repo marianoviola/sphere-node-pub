@@ -108,6 +108,15 @@ describe("renderIndexPage", () => {
     expect(out).toContain("https://sphere.pub");
   });
 
+  it("renders the mark from the served asset and links the name to publisher.url", () => {
+    const out = renderIndexPage(
+      { publisherName: "Acme Press", publisherUrl: "https://acme.example", publisherIcon: "/assets/sphere-mark.svg" },
+      [{ id: "x", title: "X", policy: "free", words: 10, updatedTs: Date.UTC(2026, 0, 1) }],
+    );
+    expect(out).toContain('src="/assets/sphere-mark.svg"'); // mark from served asset, not inline svg
+    expect(out).toContain('<a class="pub-link" href="https://acme.example">Acme Press</a>');
+  });
+
   it("is mobile-responsive: viewport meta and a stacking breakpoint", () => {
     const out = renderIndexPage({ publisherName: "Acme Press" }, [
       { id: "x", title: "X", policy: "free", words: 10, updatedTs: Date.UTC(2026, 0, 1) },

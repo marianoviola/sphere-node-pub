@@ -5,10 +5,11 @@
 // Worker `env` via the adapters and delegates. Cloudflare types are allowed here
 // (this is the platform layer); core/ never imports them.
 
-import { buildDiscovery } from "../../core/discovery.ts";
+import { buildDiscovery, type DiscoveryPublisher } from "../../core/discovery.ts";
 import { DEFAULT_PREVIEW_CHARS, gateContent } from "../../core/gate.ts";
 import { getContent } from "../../core/fragments.ts";
 import { countWords } from "../../core/markdown.ts";
+import type { PublisherRef } from "../../core/types.ts";
 import {
   renderFragmentPage,
   renderIndexPage,
@@ -44,6 +45,10 @@ const TOP_FRAGMENTS_LIMIT = 5;
 export interface NodeConfig {
   publisherName: string;
   publisherSummary?: string;
+  /** Publisher's canonical URL (SPHERE_PUBLISHER_URL). Omitted from output if unset. */
+  publisherUrl?: string;
+  /** URL to the publisher mark (SPHERE_PUBLISHER_ICON). Falls back to the node's own mark. */
+  publisherIcon?: string;
   defaultLicense: string;
   ownerToken: string;
 }
@@ -68,6 +73,8 @@ interface Env {
   SPHERE_CACHE: KVNamespace;
   SPHERE_PUBLISHER_NAME: string;
   SPHERE_PUBLISHER_SUMMARY?: string;
+  SPHERE_PUBLISHER_URL?: string;
+  SPHERE_PUBLISHER_ICON?: string;
   SPHERE_DEFAULT_LICENSE: string;
   SPHERE_OWNER_TOKEN: string;
 }
@@ -98,12 +105,39 @@ function wantsHtml(request: Request): boolean {
   return (request.headers.get("accept") ?? "").includes("text/html");
 }
 
+/** Stable path at which the node serves its own canonical mark. */
+const MARK_PATH = "/assets/sphere-mark.svg";
+
+/**
+ * The publisher reference that travels with the discovery doc and every fragment.
+ * The icon defaults to this node's own served mark when SPHERE_PUBLISHER_ICON is
+ * unset; an unset url is left undefined and so drops out of the JSON entirely.
+ */
+function publisherRef(deps: Deps, request: Request): PublisherRef {
+  const c = deps.config;
+  const origin = new URL(request.url).origin;
+  return {
+    name: c.publisherName,
+    url: c.publisherUrl,
+    icon: c.publisherIcon || `${origin}${MARK_PATH}`,
+  };
+}
+
+/** The discovery publisher block: the compact ref plus the node summary. */
+function discoveryPublisher(deps: Deps, request: Request): DiscoveryPublisher {
+  const ref = publisherRef(deps, request);
+  return { name: ref.name, summary: deps.config.publisherSummary, url: ref.url, icon: ref.icon };
+}
+
 function chromeFor(deps: Deps, request: Request): SiteChrome {
+  const ref = publisherRef(deps, request);
   return {
     publisherName: deps.config.publisherName,
     publisherSummary: deps.config.publisherSummary,
     defaultLicense: deps.config.defaultLicense,
     host: new URL(request.url).host,
+    publisherUrl: ref.url,
+    publisherIcon: ref.icon,
   };
 }
 
@@ -136,7 +170,7 @@ async function handleDiscovery(deps: Deps, ctx: RequestContext, request: Request
 
   const fragments = await deps.fragments.list();
   const doc = buildDiscovery(
-    { publisherName: deps.config.publisherName, defaultLicense: deps.config.defaultLicense },
+    { publisher: discoveryPublisher(deps, request), defaultLicense: deps.config.defaultLicense },
     fragments,
   );
   const body = JSON.stringify(doc);
@@ -157,7 +191,9 @@ async function handleManifest(
   if (!fragment) return json({ error: "fragment_not_found", id }, 404);
 
   logEvent(deps, ctx, request, id, "manifest");
-  return json(fragment.manifest);
+  // Attach the publisher reference so attribution travels with a single fragment
+  // read in isolation. Additive: no existing manifest field changes meaning.
+  return json({ ...fragment.manifest, publisher: publisherRef(deps, request) });
 }
 
 async function handleContent(
@@ -329,6 +365,7 @@ export async function handleRequest(
   // Brand assets: favicon, raster icon, and the Open Graph banner. Served to
   // any client regardless of Accept; they don't touch the machine contract and
   // log no ledger events.
+  if (path === MARK_PATH) return asset(FAVICON_SVG, "image/svg+xml; charset=utf-8");
   if (path === "/favicon.svg") return asset(FAVICON_SVG, "image/svg+xml; charset=utf-8");
   if (path === "/icon.png") return asset(bytesFromBase64(ICON_PNG_BASE64), "image/png");
   if (path === "/favicon.ico") return asset(bytesFromBase64(ICON_PNG_BASE64), "image/png");
@@ -376,6 +413,8 @@ export function depsFromEnv(env: Env): Deps {
     config: {
       publisherName: env.SPHERE_PUBLISHER_NAME ?? "Sphere Node",
       publisherSummary: env.SPHERE_PUBLISHER_SUMMARY || undefined,
+      publisherUrl: env.SPHERE_PUBLISHER_URL || undefined,
+      publisherIcon: env.SPHERE_PUBLISHER_ICON || undefined,
       defaultLicense: env.SPHERE_DEFAULT_LICENSE ?? "CC-BY",
       ownerToken: env.SPHERE_OWNER_TOKEN ?? "",
     },

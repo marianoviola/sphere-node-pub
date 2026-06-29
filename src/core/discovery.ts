@@ -13,16 +13,24 @@ export interface DiscoveryFragmentEntry {
   content: string;
 }
 
+/** The publisher block in the discovery document: a compact ref plus a summary. */
+export interface DiscoveryPublisher {
+  name: string;
+  summary?: string;
+  url?: string;
+  icon?: string;
+}
+
 export interface DiscoveryDocument {
   sphere_version: string;
-  publisher: { name: string };
+  publisher: DiscoveryPublisher;
   default_license: string;
   fragment_count: number;
   fragments: DiscoveryFragmentEntry[];
 }
 
 export function buildDiscovery(
-  config: { publisherName: string; defaultLicense: string },
+  config: { publisher: DiscoveryPublisher; defaultLicense: string },
   fragments: StoredFragment[],
 ): DiscoveryDocument {
   const entries: DiscoveryFragmentEntry[] = fragments.map((f) => ({
@@ -35,7 +43,7 @@ export function buildDiscovery(
 
   return {
     sphere_version: SPHERE_VERSION,
-    publisher: { name: config.publisherName },
+    publisher: config.publisher,
     default_license: config.defaultLicense,
     fragment_count: entries.length,
     fragments: entries,

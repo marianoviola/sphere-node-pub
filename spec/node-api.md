@@ -12,10 +12,20 @@ All responses are UTF-8. The node is single-tenant: one publisher, one owner.
 Publisher discovery document. ALWAYS returns `200`, even when the node has no
 fragments. Served from the KV cache, falling back to D1 when the cache is cold.
 
+The `publisher` object carries attribution: `name`, an optional `summary`, the
+publisher's canonical `url`, and an `icon` URL (the publisher mark). `icon`
+defaults to this node's own served mark (`/assets/sphere-mark.svg`); `url` is
+omitted when unset.
+
 ```json
 {
   "sphere_version": "1.0",
-  "publisher": { "name": "Example Publisher" },
+  "publisher": {
+    "name": "Example Publisher",
+    "summary": "Agent-readable publishing.",
+    "url": "https://example.com",
+    "icon": "https://node.example/assets/sphere-mark.svg"
+  },
   "default_license": "CC-BY",
   "fragment_count": 1,
   "fragments": [
@@ -36,6 +46,16 @@ Ledger event: `discovery`.
 
 Fragment manifest. Metadata is always available regardless of access policy.
 `404` if the fragment is unknown.
+
+The node attaches a compact `publisher` reference (`{ name, url, icon }`) to the
+manifest response, so attribution travels with a single fragment read in
+isolation, not only via the node index. This is additive — no authored manifest
+field changes meaning.
+
+### `GET /assets/sphere-mark.svg`
+
+The node's canonical publisher mark (an SVG), served with `image/svg+xml` and a
+cache header. This is the default target of `publisher.icon` above.
 
 Ledger event: `manifest`.
 

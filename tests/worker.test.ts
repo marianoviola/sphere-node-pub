@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { handleRequest } from "../src/platform/cloudflare/worker.ts";
 import { contentKeyFor } from "../src/core/fragments.ts";
 import type { FragmentManifest, StoredFragment } from "../src/core/types.ts";
-import { makeDeps, testCtx, get, readJson } from "./helpers.ts";
+import { makeDeps, testConfig, testCtx, get, readJson } from "./helpers.ts";
 
 function seed(deps: ReturnType<typeof makeDeps>, manifest: FragmentManifest, content: string): void {
   const stored: StoredFragment = {
@@ -43,6 +43,9 @@ describe("discovery route", () => {
     const doc = await readJson(res);
     expect(doc.fragment_count).toBe(0);
     expect(doc.fragments).toEqual([]);
+    // Publisher attribution: name plus an icon defaulting to this node's mark.
+    expect(doc.publisher.name).toBe("Test Publisher");
+    expect(doc.publisher.icon).toBe("https://node.example/assets/sphere-mark.svg");
   });
 
   it("lists seeded fragments and serves a cached copy on the second call", async () => {
@@ -68,10 +71,51 @@ describe("manifest route", () => {
 
     const ok = await handleRequest(get("/fragments/2026-01-15-free/sphere.json"), deps, testCtx());
     expect(ok.status).toBe(200);
-    expect((await readJson(ok)).id).toBe("2026-01-15-free");
+    const manifest = await readJson(ok);
+    expect(manifest.id).toBe("2026-01-15-free");
+    // Existing manifest fields are unchanged...
+    expect(manifest.title).toBe("Free Fragment");
+    expect(manifest.access).toEqual({ policy: "free" });
+    // ...and the publisher reference travels with the fragment.
+    expect(manifest.publisher.name).toBe("Test Publisher");
+    expect(manifest.publisher.icon).toBe("https://node.example/assets/sphere-mark.svg");
 
     const missing = await handleRequest(get("/fragments/nope/sphere.json"), deps, testCtx());
     expect(missing.status).toBe(404);
+  });
+
+  it("includes a configured publisher url + icon in discovery and per fragment", async () => {
+    const deps = makeDeps({
+      config: testConfig({
+        publisherUrl: "https://marianoviola.com",
+        publisherIcon: "https://sphere.pub/assets/sphere-mark.svg",
+      }),
+    });
+    seed(deps, freeManifest, "free body");
+
+    const disc = await readJson(await handleRequest(get("/.well-known/sphere.json"), deps, testCtx()));
+    expect(disc.publisher.url).toBe("https://marianoviola.com");
+    expect(disc.publisher.icon).toBe("https://sphere.pub/assets/sphere-mark.svg");
+
+    const manifest = await readJson(
+      await handleRequest(get("/fragments/2026-01-15-free/sphere.json"), deps, testCtx()),
+    );
+    expect(manifest.publisher).toEqual({
+      name: "Test Publisher",
+      url: "https://marianoviola.com",
+      icon: "https://sphere.pub/assets/sphere-mark.svg",
+    });
+  });
+});
+
+describe("served mark asset", () => {
+  it("serves the canonical mark at a stable path with an svg content-type", async () => {
+    const deps = makeDeps();
+    const res = await handleRequest(get("/assets/sphere-mark.svg"), deps, testCtx());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("image/svg+xml");
+    expect(res.headers.get("cache-control")).toContain("max-age");
+    expect(await res.text()).toContain("<svg");
   });
 });
 

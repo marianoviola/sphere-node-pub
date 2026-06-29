@@ -2,7 +2,15 @@ import { describe, it, expect } from "vitest";
 import { buildDiscovery, SPHERE_VERSION } from "../src/core/discovery.ts";
 import type { StoredFragment } from "../src/core/types.ts";
 
-const config = { publisherName: "Test Publisher", defaultLicense: "CC-BY" };
+const config = {
+  publisher: {
+    name: "Test Publisher",
+    summary: "We publish things.",
+    url: "https://pub.example",
+    icon: "https://pub.example/mark.svg",
+  },
+  defaultLicense: "CC-BY",
+};
 
 function frag(id: string, policy: "free" | "paid"): StoredFragment {
   return {
@@ -17,6 +25,10 @@ describe("buildDiscovery", () => {
     const doc = buildDiscovery(config, []);
     expect(doc.sphere_version).toBe(SPHERE_VERSION);
     expect(doc.publisher.name).toBe("Test Publisher");
+    // Publisher attribution fields travel in the discovery document.
+    expect(doc.publisher.summary).toBe("We publish things.");
+    expect(doc.publisher.url).toBe("https://pub.example");
+    expect(doc.publisher.icon).toBe("https://pub.example/mark.svg");
     expect(doc.default_license).toBe("CC-BY");
     expect(doc.fragment_count).toBe(0);
     expect(doc.fragments).toEqual([]);

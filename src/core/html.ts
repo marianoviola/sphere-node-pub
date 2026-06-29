@@ -27,6 +27,10 @@ export interface SiteChrome {
   defaultLicense?: string;
   /** Request host (e.g. "quietfield.org"), shown quietly in the status line. */
   host?: string;
+  /** Publisher's canonical URL; the publisher name links to it when present. */
+  publisherUrl?: string;
+  /** URL to the publisher mark (defaults to the node's served mark). */
+  publisherIcon?: string;
 }
 
 /** One row in the index list. */
@@ -157,6 +161,8 @@ body {
   letter-spacing: 0.22em; color: var(--eyebrow); margin-bottom: 16px;
 }
 .pub h1 { margin: 0; font-weight: 500; font-size: clamp(2rem, 8vw, 48px); line-height: 1.04; letter-spacing: -0.012em; }
+.pub-link { color: inherit; text-decoration: none; }
+.pub-link:hover { color: var(--accent); }
 .pub-summary {
   margin: 14px 0 0; font-size: 18px; line-height: 1.5; font-style: italic;
   color: var(--muted); max-width: 30em;
@@ -392,29 +398,25 @@ function policyChip(policy: string, price?: number): string {
   return `<span class="chip chip--${cls}">${escapeHtml(label)}</span>`;
 }
 
-/** The glossy Sphere mark, inlined as SVG at the given pixel size. */
-function sphereMark(px: number, gradId: string): string {
-  return `<svg class="orb" width="${px}" height="${px}" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-<defs><radialGradient id="${gradId}" cx="33%" cy="27%" r="78%">
-<stop offset="0%" stop-color="#f8f1f5"/><stop offset="47%" stop-color="#8a5a7d"/><stop offset="100%" stop-color="#3d2235"/>
-</radialGradient></defs>
-<circle cx="60" cy="60" r="59" fill="url(#${gradId})"/>
-<ellipse cx="60" cy="60" rx="21" ry="58" fill="none" stroke="#ffffff" stroke-opacity="0.34"/>
-<ellipse cx="60" cy="60" rx="58" ry="21" fill="none" stroke="#ffffff" stroke-opacity="0.22"/>
-<circle cx="60" cy="60" r="59" fill="none" stroke="#000000" stroke-opacity="0.14"/>
-</svg>`;
+// The node's own served mark. Same-origin, so a relative path is enough on the
+// human surface; the machine output uses the absolute form.
+const MARK_SRC = "/assets/sphere-mark.svg";
+
+/** The glossy Sphere mark, rendered from a served SVG asset at the given size. */
+function markImg(src: string, px: number): string {
+  return `<img class="orb" src="${escapeHtml(src)}" width="${px}" height="${px}" alt="" aria-hidden="true">`;
 }
 
-function masthead(): string {
+function masthead(chrome: SiteChrome): string {
   return `<div class="masthead">
-    ${sphereMark(30, "mk-top")}
+    ${markImg(chrome.publisherIcon ?? MARK_SRC, 30)}
     <div class="wordmark"><span class="name">Sphere</span><span class="node">NODE</span></div>
   </div>`;
 }
 
 function footer(license: string): string {
   return `<div class="foot">
-    <span class="running">${sphereMark(13, "mk-foot")}<a href="${SPHERE_PROJECT_URL}">running on Sphere</a></span>
+    <span class="running">${markImg(MARK_SRC, 13)}<a href="${SPHERE_PROJECT_URL}">running on Sphere</a></span>
     <span>Apache-2.0 node · ${escapeHtml(license)} content</span>
   </div>`;
 }
@@ -448,7 +450,7 @@ function headMeta(chrome: SiteChrome, opts: { title: string; description?: strin
   return tags.filter(Boolean).join("\n");
 }
 
-function layout(title: string, head: string, shell: string, scripts = ""): string {
+function layout(chrome: SiteChrome, title: string, head: string, shell: string, scripts = ""): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -463,7 +465,7 @@ ${head}
 </head>
 <body>
 <div class="shell">
-${masthead()}
+${masthead(chrome)}
 ${shell}
 </div>
 ${scripts}
@@ -507,11 +509,16 @@ export function renderIndexPage(chrome: SiteChrome, fragments: IndexFragmentView
         .join("")
     : `<div class="frag"><div class="frag-desc" style="margin-left:0">No fragments published yet.</div></div>`;
 
+  const name = escapeHtml(chrome.publisherName);
+  const nameHtml = chrome.publisherUrl
+    ? `<a class="pub-link" href="${escapeHtml(chrome.publisherUrl)}">${name}</a>`
+    : name;
+
   const card = `<div class="card">
     <div class="statusbar"><span>${host}</span><span>GET /&nbsp;&nbsp;·&nbsp;&nbsp;200 text/html</span></div>
     <div class="pub">
       <div class="eyebrow">PUBLISHER</div>
-      <h1>${escapeHtml(chrome.publisherName)}</h1>
+      <h1>${nameHtml}</h1>
       ${summary}
       <div class="pub-meta">${pubMeta}</div>
     </div>
@@ -520,7 +527,7 @@ export function renderIndexPage(chrome: SiteChrome, fragments: IndexFragmentView
   </div>`;
 
   const head = headMeta(chrome, { title: chrome.publisherName, description: chrome.publisherSummary, path: "/" });
-  return layout(chrome.publisherName, head, card);
+  return layout(chrome, chrome.publisherName, head, card);
 }
 
 /** A single fragment reading page. */
@@ -589,7 +596,7 @@ export function renderFragmentPage(
     description: manifest.summary,
     path,
   });
-  return layout(`${manifest.title} — ${chrome.publisherName}`, pageHead, card, scripts);
+  return layout(chrome, `${manifest.title} — ${chrome.publisherName}`, pageHead, card, scripts);
 }
 
 /** The paid/metered gate. Honest by construction: shown, never charged in v1. */
@@ -638,5 +645,5 @@ export function renderNotFoundPage(chrome: SiteChrome, message: string): string 
     ${footer(license)}
   </div>`;
   const head = headMeta(chrome, { title: `Not found — ${chrome.publisherName}`, description: chrome.publisherSummary, path: "/" });
-  return layout(`Not found — ${chrome.publisherName}`, head, card);
+  return layout(chrome, `Not found — ${chrome.publisherName}`, head, card);
 }

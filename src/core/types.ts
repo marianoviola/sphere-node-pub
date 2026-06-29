@@ -18,6 +18,19 @@ export interface AccessBlock {
   [key: string]: unknown;
 }
 
+/**
+ * Compact publisher reference. This travels with the discovery document AND with
+ * each fragment's machine output, so attribution (who published this, where, and
+ * their mark) is visible to any agent that reads a fragment in isolation. On
+ * Sphere the author IS the publisher and the brand: `name` is the author, `icon`
+ * is the personal mark, `url` is their canonical home.
+ */
+export interface PublisherRef {
+  name: string;
+  url?: string;
+  icon?: string;
+}
+
 export interface FragmentManifest {
   id: string;
   title: string;
