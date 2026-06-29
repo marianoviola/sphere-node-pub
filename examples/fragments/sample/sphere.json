@@ -6,12 +6,6 @@
   "access": {
     "policy": "free"
   },
-  "sources": [
-    {
-      "kind": "note",
-      "title": "Author's note",
-      "note": "Hand-written sample content, no external source."
-    }
-  ],
+  "sources": [],
   "relations": []
 }

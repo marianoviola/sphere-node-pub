@@ -60,4 +60,38 @@ describe("publish round-trip", () => {
     const errors = validateManifest({ id: "bad id", title: "", access: { policy: "weird" } }, schema);
     expect(errors.length).toBeGreaterThan(0);
   });
+
+  it("validates the typed sources contract (and migrates legacy shapes)", async () => {
+    const schema = await loadSchema();
+    const { validateManifest } = await import("../src/core/publish.ts");
+    const base = { id: "2026-01-15-a", title: "A", license: "CC-BY", access: { policy: "free" } };
+
+    // Typed external sources: valid.
+    expect(
+      validateManifest(
+        { ...base, sources: [{ type: "book", title: "Public Sphere", author: "Habermas" }] },
+        schema,
+      ),
+    ).toEqual([]);
+
+    // Legacy: only the old `source` string (deprecated lineage) — does not crash, stays valid.
+    expect(
+      validateManifest({ ...base, source: "content/notes/public-sphere.md" }, schema),
+    ).toEqual([]);
+
+    // Empty sources: valid.
+    expect(validateManifest({ ...base, sources: [] }, schema)).toEqual([]);
+
+    // The old internal-lineage `sources` shape (kind/label, no type/title) is rejected.
+    const legacy = validateManifest(
+      { ...base, sources: [{ kind: "text", url: "https://x", label: "doc" }] },
+      schema,
+    );
+    expect(legacy.length).toBeGreaterThan(0);
+
+    // An unknown source type is rejected.
+    expect(
+      validateManifest({ ...base, sources: [{ type: "tweet", title: "X" }] }, schema).length,
+    ).toBeGreaterThan(0);
+  });
 });

@@ -144,6 +144,57 @@ describe("renderFragmentPage", () => {
     expect(free).not.toContain("The rest of this fragment is paid");
   });
 
+  it("renders a typed Sources section (linked) for a fragment with sources", () => {
+    const withSources: FragmentManifest = {
+      id: "2026-01-15-free",
+      title: "Free Fragment",
+      license: "CC-BY",
+      access: { policy: "free" },
+      sources: [
+        { type: "book", title: "The Structural Transformation of the Public Sphere", author: "Jürgen Habermas", date: "1962" },
+        { type: "webpage", title: "Pay Per Crawl", url: "https://blog.cloudflare.com/introducing-pay-per-crawl/" },
+      ],
+    };
+    const out = renderFragmentPage({ publisherName: "Acme", host: "acme.example" }, withSources, {
+      markdown: "## Body\n\ntext",
+      gated: false,
+      words: 2,
+      updatedTs: Date.UTC(2026, 0, 15),
+    });
+    expect(out).toContain('class="sources"');
+    expect(out).toContain(">SOURCES<");
+    expect(out).toContain("The Structural Transformation of the Public Sphere");
+    expect(out).toContain("Jürgen Habermas");
+    expect(out).toContain('<a class="source-title" href="https://blog.cloudflare.com/introducing-pay-per-crawl/"');
+    expect(out).toContain(">book<");
+  });
+
+  it("renders no Sources section when sources is empty or absent", () => {
+    const out = renderFragmentPage({ publisherName: "Acme" }, freeManifest, {
+      markdown: "x",
+      gated: false,
+      words: 1,
+      updatedTs: Date.UTC(2026, 0, 15),
+    });
+    expect(out).not.toContain('class="sources"');
+  });
+
+  it("does not surface legacy internal-lineage entries (no title) as sources", () => {
+    const legacy = {
+      ...freeManifest,
+      // The old internal-lineage shape: kind/url/label, no title.
+      sources: [{ kind: "text", url: "https://github.com/x/blob/main/doc.md", label: "Original Markdown source" }],
+    } as unknown as FragmentManifest;
+    const out = renderFragmentPage({ publisherName: "Acme" }, legacy, {
+      markdown: "x",
+      gated: false,
+      words: 1,
+      updatedTs: Date.UTC(2026, 0, 15),
+    });
+    expect(out).not.toContain('class="sources"');
+    expect(out).not.toContain("Original Markdown source");
+  });
+
   it("renders the preview and the honest, not-charged gate for a paid fragment", () => {
     const gated = renderFragmentPage({ publisherName: "Acme", host: "acme.example" }, paidManifest, {
       markdown: "SECRET CONTE",

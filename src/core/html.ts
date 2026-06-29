@@ -254,6 +254,27 @@ article.fragment pre.mermaid {
   background: linear-gradient(to bottom, transparent, var(--bg));
 }
 
+/* Sources: typed external provenance, shown for humans. */
+.sources { margin: 14px 64px 0; padding: 20px 0 4px; border-top: 1px solid var(--hair); }
+.sources-label {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 10px;
+  letter-spacing: 0.22em; color: var(--eyebrow); margin-bottom: 14px;
+}
+.source-list { list-style: none; margin: 0; padding: 0; }
+.source { display: flex; gap: 12px; padding: 7px 0; align-items: baseline; }
+.source-type {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 9px; letter-spacing: 0.08em;
+  color: var(--meta); background: var(--chip); border: 1px solid var(--hair); border-radius: 3px;
+  padding: 3px 7px; flex: none; min-width: 66px; text-align: center; text-transform: uppercase;
+}
+.source-main { flex: 1; min-width: 0; font-size: 16px; line-height: 1.45; }
+.source-title { color: var(--ink); text-decoration: none; }
+a.source-title { color: var(--accent); }
+a.source-title:hover { text-decoration: underline; }
+.source-by { color: var(--muted); font-style: italic; }
+.source-meta { color: var(--meta); font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 12px; }
+.source-note { margin: 3px 0 0; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+
 .license {
   margin: 14px 64px 0; padding: 18px 0; border-top: 1px solid var(--hair);
   font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px; color: var(--meta);
@@ -297,7 +318,8 @@ article.fragment pre.mermaid {
   .pub { padding: 30px 22px 24px; }
   .foot { padding: 16px 22px; flex-wrap: wrap; gap: 6px 16px; }
   .read-head { padding: 28px 22px 4px; }
-  .rule, .license { margin-left: 22px; margin-right: 22px; }
+  .rule, .license, .sources { margin-left: 22px; margin-right: 22px; }
+  .source { flex-wrap: wrap; gap: 8px 12px; }
   .machine-row { padding: 0 22px 28px; }
   .gate { margin: 0 22px 28px; }
   .notfound { padding: 30px 22px; }
@@ -530,6 +552,42 @@ export function renderIndexPage(chrome: SiteChrome, fragments: IndexFragmentView
   return layout(chrome, chrome.publisherName, head, card);
 }
 
+/**
+ * Render the typed external "Sources" section. Defensive about shape: a typed
+ * entry has { type, title, author?, url?, date?, note? }, but legacy/odd entries
+ * never throw — we fall back to whatever label and link we can find. Only http(s)
+ * urls become links. Returns "" when there are no sources.
+ */
+function sourcesSection(sources: unknown): string {
+  if (!Array.isArray(sources)) return "";
+  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  const items = sources
+    // A typed external source requires a title. This also filters out the old
+    // internal-lineage shape ({ kind, url, label }) so build lineage never
+    // surfaces as provenance on a fragment that hasn't been re-published yet.
+    .filter((raw) => raw && typeof raw === "object" && str((raw as Record<string, unknown>).title).trim() !== "")
+    .map((raw) => {
+      const e = raw as Record<string, unknown>;
+      const title = str(e.title);
+      const type = (str(e.type) || "other").toLowerCase();
+      const url = str(e.url);
+      const author = str(e.author);
+      const date = str(e.date);
+      const note = str(e.note);
+      const isHttp = /^https?:\/\//i.test(url.trim());
+      const titleHtml = isHttp
+        ? `<a class="source-title" href="${escapeHtml(url)}" rel="noopener nofollow">${escapeHtml(title)}</a>`
+        : `<span class="source-title">${escapeHtml(title)}</span>`;
+      const by = author ? `<span class="source-by"> — ${escapeHtml(author)}</span>` : "";
+      const when = date ? `<span class="source-meta"> · ${escapeHtml(date)}</span>` : "";
+      const noteHtml = note ? `<div class="source-note">${escapeHtml(note)}</div>` : "";
+      return `<li class="source"><span class="source-type">${escapeHtml(type)}</span><span class="source-main">${titleHtml}${by}${when}${noteHtml}</span></li>`;
+    })
+    .join("");
+  if (!items) return "";
+  return `<section class="sources"><div class="sources-label">SOURCES</div><ul class="source-list">${items}</ul></section>`;
+}
+
 /** A single fragment reading page. */
 export function renderFragmentPage(
   chrome: SiteChrome,
@@ -569,9 +627,12 @@ export function renderFragmentPage(
   const article = `<article class="${articleClass}">${rendered}${fade}</article>`;
   const scripts = rendered.includes(`class="mermaid"`) ? MERMAID_SCRIPT : "";
 
+  const sources = sourcesSection(manifest.sources);
+
   let tail: string;
   if (gated) {
-    tail = gatePanel(policy, price, body.previewWords ?? 0, body.words);
+    // Provenance still belongs to a gated fragment; show it below the gate.
+    tail = gatePanel(policy, price, body.previewWords ?? 0, body.words) + sources;
   } else {
     const gloss = LICENSE_GLOSS[license];
     const glossPart = gloss ? ` — ${escapeHtml(gloss)}` : "";
@@ -581,7 +642,7 @@ export function renderFragmentPage(
       <a class="mchip" href="${escapeHtml(path)}/content.md">content.md</a>
       <span class="mchip mchip--note">↑ machine-readable</span>
     </div>`;
-    tail = licenseLine + machineRow;
+    tail = sources + licenseLine + machineRow;
   }
 
   const card = `<div class="card">

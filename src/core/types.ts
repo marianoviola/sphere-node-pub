@@ -31,13 +31,30 @@ export interface PublisherRef {
   icon?: string;
 }
 
+/** External provenance kinds a fragment may draw on. */
+export type SourceType = "book" | "article" | "paper" | "video" | "webpage" | "dataset" | "other";
+
+/**
+ * A typed EXTERNAL source: a book, article, paper, video, page, or dataset a
+ * fragment draws on. Provenance is legitimacy, so this is part of the contract.
+ * It is NOT the internal document a fragment was generated from (build lineage).
+ */
+export interface SourceRef {
+  type: SourceType;
+  title: string;
+  author?: string;
+  url?: string;
+  date?: string;
+  note?: string;
+}
+
 export interface FragmentManifest {
   id: string;
   title: string;
   summary?: string;
   license: string;
   access: AccessBlock;
-  sources?: unknown[];
+  sources?: SourceRef[];
   relations?: unknown[];
   [key: string]: unknown;
 }
