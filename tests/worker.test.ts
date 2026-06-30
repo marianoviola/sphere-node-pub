@@ -76,12 +76,39 @@ describe("manifest route", () => {
     // Existing manifest fields are unchanged...
     expect(manifest.title).toBe("Free Fragment");
     expect(manifest.access).toEqual({ policy: "free" });
+    // ...the node attaches the fragment's own absolute canonical URL...
+    expect(manifest.canonical).toBe("https://node.example/fragments/2026-01-15-free");
     // ...and the publisher reference travels with the fragment.
     expect(manifest.publisher.name).toBe("Test Publisher");
     expect(manifest.publisher.icon).toBe("https://node.example/assets/sphere-mark.svg");
 
     const missing = await handleRequest(get("/fragments/nope/sphere.json"), deps, testCtx());
     expect(missing.status).toBe(404);
+  });
+
+  it("serves typed relations through unchanged and lets the node own the canonical URL", async () => {
+    const deps = makeDeps();
+    seed(
+      deps,
+      {
+        ...freeManifest,
+        relations: [
+          { type: "continues", target: "2026-01-14-prequel" },
+          { type: "cites", target: "https://other.node/fragments/2026-01-10-source" },
+        ],
+        // An authored `canonical` is overridden by the node's own self-URL.
+        canonical: "https://stale.example/wrong",
+      },
+      "free body",
+    );
+
+    const res = await handleRequest(get("/fragments/2026-01-15-free/sphere.json"), deps, testCtx());
+    const manifest = await readJson(res);
+    expect(manifest.relations).toEqual([
+      { type: "continues", target: "2026-01-14-prequel" },
+      { type: "cites", target: "https://other.node/fragments/2026-01-10-source" },
+    ]);
+    expect(manifest.canonical).toBe("https://node.example/fragments/2026-01-15-free");
   });
 
   it("includes a configured publisher url + icon in discovery and per fragment", async () => {

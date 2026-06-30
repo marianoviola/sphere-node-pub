@@ -94,4 +94,46 @@ describe("publish round-trip", () => {
       validateManifest({ ...base, sources: [{ type: "tweet", title: "X" }] }, schema).length,
     ).toBeGreaterThan(0);
   });
+
+  it("validates the typed relations edge (and rejects legacy/malformed shapes)", async () => {
+    const schema = await loadSchema();
+    const { validateManifest } = await import("../src/core/publish.ts");
+    const base = { id: "2026-01-15-a", title: "A", license: "CC-BY", access: { policy: "free" } };
+
+    // Typed edges: same-node id target and absolute external URL target are both valid.
+    expect(
+      validateManifest(
+        {
+          ...base,
+          relations: [
+            { type: "continues", target: "2026-01-14-prequel" },
+            { type: "cites", target: "https://other.node/fragments/2026-01-10-source" },
+          ],
+        },
+        schema,
+      ),
+    ).toEqual([]);
+
+    // Empty relations: valid.
+    expect(validateManifest({ ...base, relations: [] }, schema)).toEqual([]);
+
+    // Legacy bare-string relation is rejected (it is not an object edge).
+    expect(
+      validateManifest({ ...base, relations: ["2026-01-14-prequel"] }, schema).length,
+    ).toBeGreaterThan(0);
+
+    // Legacy split shape ({ type, fragment_id } / { type, url }) is rejected: it
+    // has no `target`.
+    expect(
+      validateManifest(
+        { ...base, relations: [{ type: "extends", fragment_id: "2026-01-14-prequel" }] },
+        schema,
+      ).length,
+    ).toBeGreaterThan(0);
+
+    // A typeless edge is rejected.
+    expect(
+      validateManifest({ ...base, relations: [{ target: "2026-01-14-prequel" }] }, schema).length,
+    ).toBeGreaterThan(0);
+  });
 });

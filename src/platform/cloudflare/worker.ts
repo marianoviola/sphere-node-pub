@@ -191,9 +191,13 @@ async function handleManifest(
   if (!fragment) return json({ error: "fragment_not_found", id }, 404);
 
   logEvent(deps, ctx, request, id, "manifest");
-  // Attach the publisher reference so attribution travels with a single fragment
-  // read in isolation. Additive: no existing manifest field changes meaning.
-  return json({ ...fragment.manifest, publisher: publisherRef(deps, request) });
+  // Attach the fragment's own absolute canonical URL and the publisher reference,
+  // so an agent reading a fragment in isolation knows its home and who published
+  // it. Additive: no existing manifest field changes meaning. The node is
+  // authoritative for the canonical self-URL, so it always overrides any authored
+  // `canonical` field.
+  const canonical = `${new URL(request.url).origin}/fragments/${id}`;
+  return json({ ...fragment.manifest, canonical, publisher: publisherRef(deps, request) });
 }
 
 async function handleContent(

@@ -48,6 +48,20 @@ export interface SourceRef {
   note?: string;
 }
 
+/**
+ * A typed edge to another fragment. `type` is a short, open relation kind
+ * (related, continues, cites, responds-to, ...). `target` is a CANONICAL
+ * fragment reference: a same-node id (yyyy-mm-dd-slug) or an absolute external
+ * fragment URL ({node_base}/fragments/{id}). The reference scheme is documented
+ * in spec/node-api.md and is used identically by relations, inline links, and
+ * the machine views.
+ */
+export interface RelationEdge {
+  type: string;
+  target: string;
+  [key: string]: unknown;
+}
+
 export interface FragmentManifest {
   id: string;
   title: string;
@@ -55,7 +69,7 @@ export interface FragmentManifest {
   license: string;
   access: AccessBlock;
   sources?: SourceRef[];
-  relations?: unknown[];
+  relations?: RelationEdge[];
   [key: string]: unknown;
 }
 

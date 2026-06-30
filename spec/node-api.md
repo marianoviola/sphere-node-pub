@@ -5,6 +5,36 @@ manifest shape is defined in `fragment.schema.json`.
 
 All responses are UTF-8. The node is single-tenant: one publisher, one owner.
 
+## Canonical fragment reference
+
+A fragment has exactly one canonical location on its home node:
+
+```
+GET /fragments/{id}
+```
+
+`{id}` is the URL path segment, format `yyyy-mm-dd-slug` (see
+`fragment.schema.json`). Its machine views are the two sub-resources of that
+location: `/fragments/{id}/sphere.json` (the manifest) and
+`/fragments/{id}/content.md` (the body). The fragment's ABSOLUTE canonical URL is
+therefore:
+
+```
+{node_base}/fragments/{id}
+```
+
+A **reference** to a fragment is exactly one of:
+
+- **same-node** — the bare `id` (`2026-01-15-sample-fragment`), resolved against
+  this node, or
+- **external** — an absolute URL to another node's canonical fragment URL
+  (`https://other.node/fragments/2026-01-15-their-fragment`).
+
+This single scheme is used identically everywhere a fragment is referenced:
+`relations[].target` (see `fragment.schema.json`), inline links inside
+`content.md`, and the machine views above. There is no second addressing form;
+an `id` is just the same-node short form of the absolute canonical URL.
+
 ## Public face (unauthenticated, for agents)
 
 ### `GET /.well-known/sphere.json`
@@ -47,10 +77,21 @@ Ledger event: `discovery`.
 Fragment manifest. Metadata is always available regardless of access policy.
 `404` if the fragment is unknown.
 
-The node attaches a compact `publisher` reference (`{ name, url, icon }`) to the
-manifest response, so attribution travels with a single fragment read in
-isolation, not only via the node index. This is additive — no authored manifest
-field changes meaning.
+The node attaches two fields to the manifest response, both additive — no
+authored manifest field changes meaning:
+
+- `canonical`: the fragment's own absolute canonical URL
+  (`{node_base}/fragments/{id}`), so an agent reading a fragment in isolation
+  knows its home. The node is authoritative for this value and always sets it,
+  overriding any authored `canonical` field.
+- `publisher`: a compact publisher reference (`{ name, url, icon }`), so
+  attribution travels with a single fragment read, not only via the node index.
+
+The authored `relations` array is served through unchanged in its authored JSON
+position. Each edge is `{ type, target }` where `target` is a canonical fragment
+reference per the scheme above (a same-node `id` or an absolute external fragment
+URL). The node validates this shape on ingest (publish) against
+`fragment.schema.json`; it does not rewrite or resolve targets at read time.
 
 ### `GET /assets/sphere-mark.svg`
 
