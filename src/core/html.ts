@@ -275,6 +275,28 @@ a.source-title:hover { text-decoration: underline; }
 .source-meta { color: var(--meta); font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 12px; }
 .source-note { margin: 3px 0 0; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
 
+/* Related: typed edges to other fragments, shown for humans. */
+.relations { margin: 14px 64px 0; padding: 20px 0 4px; border-top: 1px solid var(--hair); }
+.relations-label {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 10px;
+  letter-spacing: 0.22em; color: var(--eyebrow); margin-bottom: 14px;
+}
+.relation-list { list-style: none; margin: 0; padding: 0; }
+.relation { display: flex; gap: 12px; padding: 7px 0; align-items: baseline; }
+.relation-type {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 9px; letter-spacing: 0.08em;
+  color: var(--meta); background: var(--chip); border: 1px solid var(--hair); border-radius: 3px;
+  padding: 3px 7px; flex: none; min-width: 66px; text-align: center; text-transform: uppercase;
+}
+.relation-main { flex: 1; min-width: 0; font-size: 16px; line-height: 1.45; overflow-wrap: anywhere; }
+.relation-target { color: var(--ink); text-decoration: none; }
+a.relation-target { color: var(--accent); }
+a.relation-target:hover { text-decoration: underline; }
+.relation-ext {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px; color: var(--meta);
+  margin-left: 6px; white-space: nowrap;
+}
+
 .license {
   margin: 14px 64px 0; padding: 18px 0; border-top: 1px solid var(--hair);
   font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 11px; color: var(--meta);
@@ -318,8 +340,8 @@ a.source-title:hover { text-decoration: underline; }
   .pub { padding: 30px 22px 24px; }
   .foot { padding: 16px 22px; flex-wrap: wrap; gap: 6px 16px; }
   .read-head { padding: 28px 22px 4px; }
-  .rule, .license, .sources { margin-left: 22px; margin-right: 22px; }
-  .source { flex-wrap: wrap; gap: 8px 12px; }
+  .rule, .license, .sources, .relations { margin-left: 22px; margin-right: 22px; }
+  .source, .relation { flex-wrap: wrap; gap: 8px 12px; }
   .machine-row { padding: 0 22px 28px; }
   .gate { margin: 0 22px 28px; }
   .notfound { padding: 30px 22px; }
@@ -588,11 +610,51 @@ function sourcesSection(sources: unknown): string {
   return `<section class="sources"><div class="sources-label">SOURCES</div><ul class="source-list">${items}</ul></section>`;
 }
 
+/**
+ * The "Related" section: typed edges to other fragments. Each edge is
+ * { type, target } where `target` is a canonical fragment reference:
+ *  - same-node — a bare id (yyyy-mm-dd-slug), resolved to its title via `titles`
+ *    and linked to /fragments/{id}. An id missing from the map degrades to plain
+ *    text (the target still exists as a reference, we just can't name it here).
+ *  - external — an absolute http(s) URL, linked out and marked external with
+ *    rel="noopener".
+ * The `type` shows as a quiet mono label. Defensive about shape: never throws,
+ * skips edges without a usable target. Returns "" when there are no relations.
+ */
+function relationsSection(relations: unknown, titles: Map<string, string>): string {
+  if (!Array.isArray(relations)) return "";
+  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  const items = relations
+    .filter((raw) => raw && typeof raw === "object" && str((raw as Record<string, unknown>).target).trim() !== "")
+    .map((raw) => {
+      const e = raw as Record<string, unknown>;
+      const type = str(e.type).trim() || "related";
+      const target = str(e.target).trim();
+      const isExternal = /^https?:\/\//i.test(target);
+      let mainHtml: string;
+      if (isExternal) {
+        // Another node's canonical fragment URL: link out, marked external.
+        mainHtml = `<a class="relation-target" href="${escapeHtml(target)}" rel="noopener">${escapeHtml(target)}<span class="relation-ext">↗</span></a>`;
+      } else {
+        const title = titles.get(target);
+        mainHtml = title
+          ? `<a class="relation-target" href="/fragments/${encodeURIComponent(target)}">${escapeHtml(title)}</a>`
+          : `<span class="relation-target">${escapeHtml(target)}</span>`;
+      }
+      return `<li class="relation"><span class="relation-type">${escapeHtml(type)}</span><span class="relation-main">${mainHtml}</span></li>`;
+    })
+    .join("");
+  if (!items) return "";
+  return `<section class="relations"><div class="relations-label">RELATED</div><ul class="relation-list">${items}</ul></section>`;
+}
+
 /** A single fragment reading page. */
 export function renderFragmentPage(
   chrome: SiteChrome,
   manifest: FragmentManifest,
   body: FragmentBody,
+  /** id -> title for same-node relation targets; empty when none apply. */
+  relationTitles: Map<string, string> = new Map(),
 ): string {
   const policy = manifest.access.policy;
   const cls = policyClass(policy);
@@ -628,11 +690,12 @@ export function renderFragmentPage(
   const scripts = rendered.includes(`class="mermaid"`) ? MERMAID_SCRIPT : "";
 
   const sources = sourcesSection(manifest.sources);
+  const relations = relationsSection(manifest.relations, relationTitles);
 
   let tail: string;
   if (gated) {
-    // Provenance still belongs to a gated fragment; show it below the gate.
-    tail = gatePanel(policy, price, body.previewWords ?? 0, body.words) + sources;
+    // Provenance and relations still belong to a gated fragment; show them below the gate.
+    tail = gatePanel(policy, price, body.previewWords ?? 0, body.words) + sources + relations;
   } else {
     const gloss = LICENSE_GLOSS[license];
     const glossPart = gloss ? ` — ${escapeHtml(gloss)}` : "";
@@ -642,7 +705,7 @@ export function renderFragmentPage(
       <a class="mchip" href="${escapeHtml(path)}/content.md">content.md</a>
       <span class="mchip mchip--note">↑ machine-readable</span>
     </div>`;
-    tail = sources + licenseLine + machineRow;
+    tail = sources + relations + licenseLine + machineRow;
   }
 
   const card = `<div class="card">

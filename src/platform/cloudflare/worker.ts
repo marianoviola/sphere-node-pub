@@ -148,6 +148,10 @@ function logEvent(
   fragmentId: string | null,
   eventType: EventType,
 ): void {
+  // A HEAD is a metadata probe: it routes exactly as the GET but appends no
+  // ledger row. Guarding here (rather than at the router) keeps every handler's
+  // logging path identical for GET while making HEAD a no-op everywhere.
+  if (request.method === "HEAD") return;
   const event = makeEvent({
     ts: Date.now(),
     fragmentId,
@@ -276,16 +280,31 @@ async function handleHumanFragment(
     previewWords = countWords(markdown);
   }
 
+  // Resolve same-node relation targets (bare ids) to their titles so the reading
+  // page can name and link them. Only pay for the extra list when the fragment
+  // actually has relations; relation-less fragments touch nothing new here.
+  let relationTitles = new Map<string, string>();
+  const relations = fragment.manifest.relations;
+  if (Array.isArray(relations) && relations.length > 0) {
+    const all = await deps.fragments.list();
+    relationTitles = new Map(all.map((f) => [f.manifest.id, f.manifest.title]));
+  }
+
   // A human page never completes payment: a gated view is a preview-only read.
   logEvent(deps, ctx, request, id, gated ? "preview" : "access");
   return html(
-    renderFragmentPage(chromeFor(deps, request), fragment.manifest, {
-      markdown,
-      gated,
-      words: totalWords,
-      previewWords,
-      updatedTs: fragment.updatedTs,
-    }),
+    renderFragmentPage(
+      chromeFor(deps, request),
+      fragment.manifest,
+      {
+        markdown,
+        gated,
+        words: totalWords,
+        previewWords,
+        updatedTs: fragment.updatedTs,
+      },
+      relationTitles,
+    ),
   );
 }
 
@@ -337,18 +356,34 @@ async function handleOwnerPayments(deps: Deps): Promise<Response> {
 
 /**
  * Platform-neutral router. Tests call this directly with in-memory ports.
+ *
+ * GET and HEAD share one routing path: a HEAD is routed exactly as the GET
+ * would be, then its body is stripped at the single exit below. HEAD is a
+ * metadata probe, so it appends no ledger events (see `logEvent`).
  */
 export async function handleRequest(
   request: Request,
   deps: Deps,
   ctx: RequestContext,
 ): Promise<Response> {
+  const method = request.method;
+  if (method !== "GET" && method !== "HEAD") {
+    return json({ error: "method_not_allowed" }, 405, { allow: "GET, HEAD" });
+  }
+
+  const res = await routeGet(request, deps, ctx);
+  // A HEAD carries the same status and headers as the GET, with an empty body.
+  return method === "HEAD" ? new Response(null, { status: res.status, headers: res.headers }) : res;
+}
+
+/** GET routing. Reached by both GET and HEAD (HEAD strips the body afterward). */
+async function routeGet(
+  request: Request,
+  deps: Deps,
+  ctx: RequestContext,
+): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
-
-  if (request.method !== "GET") {
-    return json({ error: "method_not_allowed" }, 405, { allow: "GET" });
-  }
 
   // Machine contract (unchanged). These always return the same bytes regardless
   // of the Accept header, so agents and the human surface never collide.

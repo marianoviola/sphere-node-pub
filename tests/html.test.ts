@@ -195,6 +195,47 @@ describe("renderFragmentPage", () => {
     expect(out).not.toContain("Original Markdown source");
   });
 
+  it("renders a Related section: same-node resolved, unknown id degraded, external linked out", () => {
+    const withRelations: FragmentManifest = {
+      id: "2026-01-15-free",
+      title: "Free Fragment",
+      license: "CC-BY",
+      access: { policy: "free" },
+      relations: [
+        { type: "continues", target: "2026-01-14-prequel" },
+        { type: "responds-to", target: "2026-01-10-missing" },
+        { type: "cites", target: "https://other.node/fragments/2026-01-10-source" },
+      ],
+    };
+    const out = renderFragmentPage(
+      { publisherName: "Acme", host: "acme.example" },
+      withRelations,
+      { markdown: "## Body\n\ntext", gated: false, words: 2, updatedTs: Date.UTC(2026, 0, 15) },
+      new Map([["2026-01-14-prequel", "The Prequel"]]),
+    );
+    expect(out).toContain('class="relations"');
+    expect(out).toContain(">RELATED<");
+    // Same-node target resolves to a title and links to its reading page.
+    expect(out).toContain('<a class="relation-target" href="/fragments/2026-01-14-prequel">The Prequel</a>');
+    expect(out).toContain(">continues<");
+    // Unknown same-node id degrades to plain text (no link), never throws.
+    expect(out).toContain('<span class="relation-target">2026-01-10-missing</span>');
+    // External target links out, marked external with rel="noopener".
+    expect(out).toContain('<a class="relation-target" href="https://other.node/fragments/2026-01-10-source" rel="noopener">');
+    expect(out).toContain('class="relation-ext"');
+  });
+
+  it("renders no Related section when relations is empty or absent", () => {
+    const out = renderFragmentPage({ publisherName: "Acme" }, freeManifest, {
+      markdown: "x",
+      gated: false,
+      words: 1,
+      updatedTs: Date.UTC(2026, 0, 15),
+    });
+    expect(out).not.toContain('class="relations"');
+    expect(out).not.toContain(">RELATED<");
+  });
+
   it("renders the preview and the honest, not-charged gate for a paid fragment", () => {
     const gated = renderFragmentPage({ publisherName: "Acme", host: "acme.example" }, paidManifest, {
       markdown: "SECRET CONTE",
@@ -252,6 +293,29 @@ describe("human routes via content negotiation", () => {
     expect(body).not.toContain("long enough to be truncated");
     expect(body).toContain("The rest of this fragment is paid");
     expect(body).toContain("returned, not charged");
+  });
+
+  it("resolves same-node relation titles from the catalog on the reading page", async () => {
+    const deps = makeDeps();
+    seed(deps, { ...freeManifest, id: "2026-01-14-prequel", title: "The Prequel" }, "prequel body");
+    seed(
+      deps,
+      {
+        ...freeManifest,
+        relations: [
+          { type: "continues", target: "2026-01-14-prequel" },
+          { type: "cites", target: "https://other.node/fragments/2026-01-10-source" },
+        ],
+      },
+      "# Free Fragment\n\nThe whole body is here.",
+    );
+    const res = await handleRequest(htmlGet("/fragments/2026-01-15-free"), deps, testCtx());
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain(">RELATED<");
+    // The same-node target's title is resolved from deps.fragments.list().
+    expect(body).toContain('href="/fragments/2026-01-14-prequel">The Prequel</a>');
+    expect(body).toContain('href="https://other.node/fragments/2026-01-10-source" rel="noopener"');
   });
 
   it("does not leak the human surface into the machine content route", async () => {

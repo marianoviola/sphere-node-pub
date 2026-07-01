@@ -258,8 +258,11 @@ describe("owner face", () => {
   });
 });
 
+const head = (path: string, headers: Record<string, string> = {}): Request =>
+  new Request(`https://node.example${path}`, { method: "HEAD", headers });
+
 describe("method handling", () => {
-  it("rejects non-GET methods with 405", async () => {
+  it("rejects methods other than GET and HEAD with 405 and a GET, HEAD allow header", async () => {
     const deps = makeDeps();
     const res = await handleRequest(
       new Request("https://node.example/.well-known/sphere.json", { method: "POST" }),
@@ -267,5 +270,42 @@ describe("method handling", () => {
       testCtx(),
     );
     expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("GET, HEAD");
+  });
+});
+
+describe("HEAD requests", () => {
+  it("answers HEAD on the mark asset with GET status and headers but an empty body", async () => {
+    const deps = makeDeps();
+    const getRes = await handleRequest(get("/assets/sphere-mark.svg"), deps, testCtx());
+    const headRes = await handleRequest(head("/assets/sphere-mark.svg"), deps, testCtx());
+
+    expect(headRes.status).toBe(200);
+    expect(headRes.status).toBe(getRes.status);
+    expect(headRes.headers.get("content-type")).toBe(getRes.headers.get("content-type"));
+    expect(headRes.headers.get("content-type")).toContain("image/svg+xml");
+    expect(headRes.headers.get("cache-control")).toBe(getRes.headers.get("cache-control"));
+    expect(await headRes.text()).toBe(""); // metadata only, no body
+  });
+
+  it("answers HEAD on a machine manifest route with the JSON content-type and no body", async () => {
+    const deps = makeDeps();
+    seed(deps, freeManifest, "free body");
+    const res = await handleRequest(head("/fragments/2026-01-15-free/sphere.json"), deps, testCtx());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(await res.text()).toBe("");
+  });
+
+  it("appends no ledger events for HEAD (a HEAD is a metadata probe)", async () => {
+    const deps = makeDeps();
+    seed(deps, freeManifest, "free body");
+
+    const ctx = testCtx();
+    await handleRequest(head("/fragments/2026-01-15-free/sphere.json"), deps, ctx);
+    await ctx.settle();
+
+    const events = (deps.events as ReturnType<typeof makeDeps>["events"] & { events: unknown[] }).events;
+    expect(events.length).toBe(0);
   });
 });
