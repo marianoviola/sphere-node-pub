@@ -410,13 +410,21 @@ async function routeGet(
   if (path === "/favicon.ico") return asset(bytesFromBase64(ICON_PNG_BASE64), "image/png");
   if (path === "/og.png") return asset(bytesFromBase64(OG_PNG_BASE64), "image/png");
 
+  // Root: the node's front door, negotiated so it NEVER 404s. A browser gets the
+  // human index; a machine — including a generic agent handed the bare URL, whose
+  // Accept is `application/json`, `*/*`, or a Sphere machine type — gets the
+  // discovery document, byte-identical to /.well-known/sphere.json (same builder,
+  // same `discovery` ledger event, no redirect so a single fetch resolves).
+  if (path === "/") {
+    return wantsHtml(request)
+      ? handleHumanIndex(deps, ctx, request)
+      : handleDiscovery(deps, ctx, request);
+  }
+
   // Human face. Only served when the client asks for HTML; otherwise these
   // paths fall through to the 404 they returned before, so the machine
   // contract is untouched.
   if (wantsHtml(request)) {
-    if (path === "/") {
-      return handleHumanIndex(deps, ctx, request);
-    }
     const fragmentPageMatch = path.match(/^\/fragments\/([^/]+)\/?$/);
     if (fragmentPageMatch) {
       return handleHumanFragment(deps, ctx, request, decodeURIComponent(fragmentPageMatch[1]!));

@@ -308,4 +308,34 @@ describe("HEAD requests", () => {
     const events = (deps.events as ReturnType<typeof makeDeps>["events"] & { events: unknown[] }).events;
     expect(events.length).toBe(0);
   });
+
+  it("answers HEAD / like the negotiated machine GET: 200, JSON headers, empty body, no ledger", async () => {
+    const deps = makeDeps();
+    seed(deps, freeManifest, "free body");
+
+    const ctx = testCtx();
+    const res = await handleRequest(head("/", { accept: "application/json" }), deps, ctx);
+    await ctx.settle();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(await res.text()).toBe("");
+
+    const events = (deps.events as ReturnType<typeof makeDeps>["events"] & { events: unknown[] }).events;
+    expect(events.length).toBe(0);
+  });
+});
+
+describe("root front door", () => {
+  it("logs a single discovery event for a machine GET / (discovery, not a fragment read)", async () => {
+    const deps = makeDeps();
+    seed(deps, freeManifest, "free body");
+
+    const ctx = testCtx();
+    await handleRequest(get("/", { accept: "application/json" }), deps, ctx);
+    await ctx.settle();
+
+    const events = (deps.events as ReturnType<typeof makeDeps>["events"] & { events: { eventType: string }[] }).events;
+    expect(events.map((e) => e.eventType)).toEqual(["discovery"]);
+  });
 });

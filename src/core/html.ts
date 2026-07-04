@@ -570,7 +570,11 @@ export function renderIndexPage(chrome: SiteChrome, fragments: IndexFragmentView
     ${footer(license)}
   </div>`;
 
-  const head = headMeta(chrome, { title: chrome.publisherName, description: chrome.publisherSummary, path: "/" });
+  // Point machines at the discovery document, so a fetcher that lands on the
+  // HTML can find the node's machine surface without guessing.
+  const head =
+    headMeta(chrome, { title: chrome.publisherName, description: chrome.publisherSummary, path: "/" }) +
+    `\n<link rel="alternate" type="application/json" href="/.well-known/sphere.json">`;
   return layout(chrome, chrome.publisherName, head, card);
 }
 

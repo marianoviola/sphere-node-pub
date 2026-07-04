@@ -117,6 +117,13 @@ describe("renderIndexPage", () => {
     expect(out).toContain('<a class="pub-link" href="https://acme.example">Acme Press</a>');
   });
 
+  it("advertises the machine discovery document with an alternate link", () => {
+    const out = renderIndexPage({ publisherName: "Acme Press" }, [
+      { id: "x", title: "X", policy: "free", words: 10, updatedTs: Date.UTC(2026, 0, 1) },
+    ]);
+    expect(out).toContain('<link rel="alternate" type="application/json" href="/.well-known/sphere.json">');
+  });
+
   it("is mobile-responsive: viewport meta and a stacking breakpoint", () => {
     const out = renderIndexPage({ publisherName: "Acme Press" }, [
       { id: "x", title: "X", policy: "free", words: 10, updatedTs: Date.UTC(2026, 0, 1) },
@@ -265,10 +272,24 @@ describe("human routes via content negotiation", () => {
     expect(body).toContain("Test Publisher");
   });
 
-  it("leaves / as a 404 for non-HTML clients (machine contract unchanged)", async () => {
+  it("serves the discovery document for machine requests to / (never 404)", async () => {
     const deps = makeDeps();
-    const res = await handleRequest(get("/"), deps, testCtx());
-    expect(res.status).toBe(404);
+    seed(deps, freeManifest, "free body");
+
+    // A generic agent handed the bare URL asks for JSON (or */*): the front door
+    // greets it with the same document as /.well-known/sphere.json, not a 404.
+    const root = await handleRequest(get("/", { accept: "application/json" }), deps, testCtx());
+    expect(root.status).toBe(200);
+    expect(root.headers.get("content-type")).toContain("application/json");
+
+    const wellKnown = await handleRequest(get("/.well-known/sphere.json"), deps, testCtx());
+    expect(await root.text()).toBe(await wellKnown.text()); // same builder, same bytes
+  });
+
+  it("serves the machine root for a wildcard Accept (*/*), not a 404", async () => {
+    const deps = makeDeps();
+    const res = await handleRequest(get("/", { accept: "*/*" }), deps, testCtx());
+    expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("application/json");
   });
 
