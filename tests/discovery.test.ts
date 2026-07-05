@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildDiscovery, SPHERE_VERSION } from "../src/core/discovery.ts";
+import { buildDiscovery, renderLlmsTxt, SPHERE_VERSION } from "../src/core/discovery.ts";
 import type { StoredFragment } from "../src/core/types.ts";
 
 const config = {
@@ -44,5 +44,35 @@ describe("buildDiscovery", () => {
       manifest: "/fragments/2026-01-15-a/sphere.json",
       content: "/fragments/2026-01-15-a/content.md",
     });
+  });
+});
+
+describe("renderLlmsTxt", () => {
+  const ORIGIN = "https://node.example";
+
+  it("renders a valid aid for an empty node with no fragment lines", () => {
+    const txt = renderLlmsTxt(buildDiscovery(config, []), ORIGIN);
+    expect(txt).toContain("# Test Publisher");
+    expect(txt).toContain("> We publish things.");
+    // Points at the authoritative machine discovery, absolute.
+    expect(txt).toContain(`${ORIGIN}/.well-known/sphere.json`);
+    // Empty, but valid: no fragment links, an explicit note instead.
+    expect(txt).toContain("No fragments published yet.");
+    expect(txt).not.toContain("](https://node.example/fragments/");
+  });
+
+  it("lists each fragment as an absolute content.md link with its title", () => {
+    const txt = renderLlmsTxt(
+      buildDiscovery(config, [frag("2026-01-15-a", "free"), frag("2026-01-16-b", "paid")]),
+      ORIGIN,
+    );
+    expect(txt).toContain("- [Title 2026-01-15-a](https://node.example/fragments/2026-01-15-a/content.md) (free)");
+    expect(txt).toContain("- [Title 2026-01-16-b](https://node.example/fragments/2026-01-16-b/content.md) (paid)");
+  });
+
+  it("does not double the origin when it carries a trailing slash", () => {
+    const txt = renderLlmsTxt(buildDiscovery(config, [frag("2026-01-15-a", "free")]), `${ORIGIN}/`);
+    expect(txt).toContain("https://node.example/fragments/2026-01-15-a/content.md");
+    expect(txt).not.toContain("https://node.example//");
   });
 });

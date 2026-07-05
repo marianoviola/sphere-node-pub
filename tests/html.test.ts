@@ -132,6 +132,20 @@ describe("renderIndexPage", () => {
     expect(out).toContain("@media (max-width: 640px)");
     expect(out).toContain("flex-direction: column"); // index rows stack on mobile
   });
+
+  it("renders a friendly empty state for a node with no fragments", () => {
+    const out = renderIndexPage({ publisherName: "Acme Press" }, []);
+    // Live, not broken: one line of reassurance...
+    expect(out).toContain("This node is live and ready.");
+    // ...and one line on how to publish the first fragment.
+    expect(out).toContain("publish_fragment");
+    expect(out).toContain("scripts/publish.ts");
+    // Still a full, valid page with the publisher chrome and Sphere credit.
+    expect(out).toContain("Acme Press");
+    expect(out).toContain("running on Sphere");
+    // No fragment rows rendered.
+    expect(out).not.toContain('class="frag"');
+  });
 });
 
 describe("renderFragmentPage", () => {
