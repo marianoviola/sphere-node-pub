@@ -7,9 +7,15 @@
 
 import { buildDiscovery, type DiscoveryPublisher } from "../../core/discovery.ts";
 import { DEFAULT_PREVIEW_CHARS, gateContent } from "../../core/gate.ts";
-import { getContent } from "../../core/fragments.ts";
+import { getContent, mediaKeyFor } from "../../core/fragments.ts";
 import { countWords } from "../../core/markdown.ts";
-import type { PublisherRef } from "../../core/types.ts";
+import { toStoredFragment, validateManifest } from "../../core/publish.ts";
+import type { JsonSchema } from "../../core/schema.ts";
+import type { FragmentManifest, PublisherRef } from "../../core/types.ts";
+// The publish route validates against the SAME contract the CLI uses. esbuild
+// (wrangler) and vitest both bundle this JSON import, so the schema ships inside
+// the Worker rather than being read from disk at runtime.
+import fragmentSchema from "../../../spec/fragment.schema.json";
 import {
   renderFragmentPage,
   renderIndexPage,
@@ -129,6 +135,15 @@ function discoveryPublisher(deps: Deps, request: Request): DiscoveryPublisher {
   return { name: ref.name, summary: deps.config.publisherSummary, url: ref.url, icon: ref.icon };
 }
 
+/**
+ * The node-authoritative canonical self-URL for a fragment. The node always owns
+ * this value (it overrides any authored `canonical`), so the manifest serve path
+ * and the owner publish response derive it identically from here.
+ */
+function canonicalFor(request: Request, id: string): string {
+  return `${new URL(request.url).origin}/fragments/${id}`;
+}
+
 function chromeFor(deps: Deps, request: Request): SiteChrome {
   const ref = publisherRef(deps, request);
   return {
@@ -200,7 +215,7 @@ async function handleManifest(
   // it. Additive: no existing manifest field changes meaning. The node is
   // authoritative for the canonical self-URL, so it always overrides any authored
   // `canonical` field.
-  const canonical = `${new URL(request.url).origin}/fragments/${id}`;
+  const canonical = canonicalFor(request, id);
   return json({ ...fragment.manifest, canonical, publisher: publisherRef(deps, request) });
 }
 
@@ -354,6 +369,90 @@ async function handleOwnerPayments(deps: Deps): Promise<Response> {
   return json({ payments, total });
 }
 
+/** Cap on the publish body: enough for a long fragment, small enough to reject abuse. */
+const OWNER_WRITE_MAX_BYTES = 1_000_000;
+
+interface PublishMedia {
+  name: string;
+  content: string;
+}
+
+/**
+ * Owner publish (upsert): the HTTP face of the CLI's publish path. It drives the
+ * SAME core (`validateManifest` + `toStoredFragment`) through the SAME bound
+ * ports (`blobs.put`, `fragments.upsert`) — no new storage logic. This is an
+ * owner write, not an access, so it appends NO ledger event and is never cached.
+ *
+ * Media parity note: media content is a string, mirroring the CLI. Binary media
+ * carries the same utf8 limitation the CLI already has; that is a known
+ * follow-up, not solved here. content.md is the core of this step.
+ */
+async function handleOwnerPublish(deps: Deps, request: Request, id: string): Promise<Response> {
+  // Reject an oversized body up front — by the declared length when present, and
+  // again by the actual text length once read (a lying content-length can't slip through).
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > OWNER_WRITE_MAX_BYTES) {
+    return json({ error: "payload_too_large", limit: OWNER_WRITE_MAX_BYTES }, 413);
+  }
+  const raw = await request.text();
+  if (raw.length > OWNER_WRITE_MAX_BYTES) {
+    return json({ error: "payload_too_large", limit: OWNER_WRITE_MAX_BYTES }, 413);
+  }
+
+  let body: { manifest?: unknown; content?: unknown; media?: unknown };
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+
+  const manifest = body.manifest;
+  if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
+    return json({ error: "manifest_required" }, 400);
+  }
+  // The path id is authoritative: the manifest must claim the same id.
+  const manifestId = (manifest as { id?: unknown }).id;
+  if (manifestId !== id) {
+    return json({ error: "id_mismatch", path: id, manifest: manifestId ?? null }, 400);
+  }
+
+  if (typeof body.content !== "string") {
+    return json({ error: "content_required" }, 400);
+  }
+  const content = body.content;
+
+  const media: PublishMedia[] = [];
+  if (body.media !== undefined) {
+    if (!Array.isArray(body.media)) return json({ error: "media_invalid" }, 400);
+    for (const item of body.media) {
+      if (
+        typeof item !== "object" ||
+        item === null ||
+        typeof (item as { name?: unknown }).name !== "string" ||
+        typeof (item as { content?: unknown }).content !== "string"
+      ) {
+        return json({ error: "media_invalid" }, 400);
+      }
+      media.push({ name: (item as PublishMedia).name, content: (item as PublishMedia).content });
+    }
+  }
+
+  const errors = validateManifest(manifest, fragmentSchema as JsonSchema);
+  if (errors.length > 0) return json({ errors }, 422);
+
+  // Validated: drive the same core the CLI drives, through the bound ports.
+  const typed = manifest as FragmentManifest;
+  const updatedTs = Date.now();
+  const stored = toStoredFragment(typed, updatedTs);
+  await deps.blobs.put(stored.contentKey, content);
+  for (const item of media) {
+    await deps.blobs.put(mediaKeyFor(typed.id, item.name), item.content);
+  }
+  await deps.fragments.upsert(stored);
+
+  return json({ id: typed.id, canonical: canonicalFor(request, typed.id), mediaCount: media.length, updatedTs });
+}
+
 /**
  * Platform-neutral router. Tests call this directly with in-memory ports.
  *
@@ -367,6 +466,12 @@ export async function handleRequest(
   ctx: RequestContext,
 ): Promise<Response> {
   const method = request.method;
+  // The owner publish route is the one write in the contract; everything else is
+  // read-only. PUT is dispatched here so the generic 405 below (and its
+  // GET, HEAD allow header) stays exactly as it was for the public surface.
+  if (method === "PUT") {
+    return routePut(request, deps);
+  }
   if (method !== "GET" && method !== "HEAD") {
     return json({ error: "method_not_allowed" }, 405, { allow: "GET, HEAD" });
   }
@@ -447,6 +552,26 @@ async function routeGet(
   }
 
   return json({ error: "not_found" }, 404);
+}
+
+/**
+ * PUT routing. The only write path in the contract: owner-authenticated publish
+ * at `/owner/fragments/{id}`, under the SAME Bearer check as the owner read
+ * routes. Any other PUT target is not a valid method for that resource.
+ */
+async function routePut(request: Request, deps: Deps): Promise<Response> {
+  const path = new URL(request.url).pathname;
+
+  const writeMatch = path.match(/^\/owner\/fragments\/([^/]+)$/);
+  if (!writeMatch) {
+    return json({ error: "method_not_allowed" }, 405, { allow: "GET, HEAD" });
+  }
+
+  if (!isOwner(deps, request)) {
+    return json({ error: "unauthorized" }, 401, { "www-authenticate": "Bearer" });
+  }
+
+  return handleOwnerPublish(deps, request, decodeURIComponent(writeMatch[1]!));
 }
 
 /** Build Deps from Worker bindings. */
