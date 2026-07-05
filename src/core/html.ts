@@ -194,6 +194,15 @@ a.frag:hover .frag-title { color: var(--accent); }
 .foot a:hover { color: var(--accent); }
 .foot .running { display: flex; align-items: center; gap: 8px; }
 
+/* Empty state: a fresh node with no fragments is live, not broken. */
+.empty { border-top: 1px solid var(--hair); padding: 40px 44px 44px; }
+.empty-lede { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -0.005em; }
+.empty-how { margin: 11px 0 0; font-size: 16px; line-height: 1.55; color: var(--muted); max-width: 40em; }
+.empty-how code {
+  font-family: "Spline Sans Mono", ui-monospace, monospace; font-size: 0.85em;
+  background: var(--panel); padding: 0.12em 0.4em; border-radius: 4px; color: var(--quote);
+}
+
 /* Reading page. */
 .read-head { padding: 34px 64px 4px; }
 .back {
@@ -338,6 +347,7 @@ a.relation-target:hover { text-decoration: underline; }
   /* Tighter horizontal padding so the prose and rows use the full width. */
   .statusbar { padding: 11px 18px; }
   .pub { padding: 30px 22px 24px; }
+  .empty { padding: 30px 22px 32px; }
   .foot { padding: 16px 22px; flex-wrap: wrap; gap: 6px 16px; }
   .read-head { padding: 28px 22px 4px; }
   .rule, .license, .sources, .relations { margin-left: 22px; margin-right: 22px; }
@@ -551,7 +561,10 @@ export function renderIndexPage(chrome: SiteChrome, fragments: IndexFragmentView
       </a>`;
         })
         .join("")
-    : `<div class="frag"><div class="frag-desc" style="margin-left:0">No fragments published yet.</div></div>`;
+    : `<div class="empty">
+        <p class="empty-lede">This node is live and ready.</p>
+        <p class="empty-how">No fragments published yet. Publish the first with the Sphere plugin's <code>publish_fragment</code> tool, or with <code>scripts/publish.ts</code> from the node repository.</p>
+      </div>`;
 
   const name = escapeHtml(chrome.publisherName);
   const nameHtml = chrome.publisherUrl

@@ -49,3 +49,41 @@ export function buildDiscovery(
     fragments: entries,
   };
 }
+
+/**
+ * Render an `/llms.txt` discovery aid from a discovery document. Follows the
+ * llms.txt convention: an H1 title, an optional blockquote summary, a pointer to
+ * the authoritative machine discovery, and a flat list of the fragments as
+ * Markdown links to their content.md. Built from the SAME document buildDiscovery
+ * produces, so it can never drift from `/.well-known/sphere.json`. An empty node
+ * yields a valid aid with no fragment lines.
+ *
+ * `origin` is the node's own origin (e.g. "https://sphere.pub"); links are made
+ * absolute so a crawler that reads llms.txt standalone can follow them.
+ */
+export function renderLlmsTxt(doc: DiscoveryDocument, origin: string): string {
+  const base = origin.replace(/\/+$/, "");
+  const lines: string[] = [`# ${doc.publisher.name}`];
+
+  if (doc.publisher.summary) {
+    lines.push("", `> ${doc.publisher.summary}`);
+  }
+
+  lines.push(
+    "",
+    `Machine-readable discovery for AI agents: ${base}/.well-known/sphere.json`,
+    "",
+    "## Fragments",
+    "",
+  );
+
+  if (doc.fragments.length === 0) {
+    lines.push("No fragments published yet.");
+  } else {
+    for (const f of doc.fragments) {
+      lines.push(`- [${f.title}](${base}${f.content}) (${f.policy})`);
+    }
+  }
+
+  return lines.join("\n") + "\n";
+}

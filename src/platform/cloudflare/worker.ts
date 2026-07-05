@@ -5,7 +5,7 @@
 // Worker `env` via the adapters and delegates. Cloudflare types are allowed here
 // (this is the platform layer); core/ never imports them.
 
-import { buildDiscovery, type DiscoveryPublisher } from "../../core/discovery.ts";
+import { buildDiscovery, renderLlmsTxt, type DiscoveryPublisher } from "../../core/discovery.ts";
 import { DEFAULT_PREVIEW_CHARS, gateContent } from "../../core/gate.ts";
 import { getContent, mediaKeyFor } from "../../core/fragments.ts";
 import { countWords } from "../../core/markdown.ts";
@@ -197,6 +197,25 @@ async function handleDiscovery(deps: Deps, ctx: RequestContext, request: Request
 
   return new Response(body, {
     headers: { "content-type": "application/json; charset=utf-8", "x-sphere-cache": "miss" },
+  });
+}
+
+/**
+ * `/llms.txt`: a plain-text discovery aid for a generic agent or crawler that
+ * expects the llms.txt convention. Built from the same catalog as the discovery
+ * document (via the same builder) so it never drifts. Served regardless of
+ * Accept; appends no ledger event and is not cached (a fresh node's empty aid
+ * must go live the moment the first fragment lands).
+ */
+async function handleLlmsTxt(deps: Deps, request: Request): Promise<Response> {
+  const fragments = await deps.fragments.list();
+  const doc = buildDiscovery(
+    { publisher: discoveryPublisher(deps, request), defaultLicense: deps.config.defaultLicense },
+    fragments,
+  );
+  const body = renderLlmsTxt(doc, new URL(request.url).origin);
+  return new Response(body, {
+    headers: { "content-type": "text/plain; charset=utf-8" },
   });
 }
 
@@ -494,6 +513,12 @@ async function routeGet(
   // of the Accept header, so agents and the human surface never collide.
   if (path === "/.well-known/sphere.json") {
     return handleDiscovery(deps, ctx, request);
+  }
+
+  // Plain-text discovery aid (llms.txt convention). Fixed path, served to any
+  // client regardless of Accept; no ledger event, not cached.
+  if (path === "/llms.txt") {
+    return handleLlmsTxt(deps, request);
   }
 
   const manifestMatch = path.match(/^\/fragments\/([^/]+)\/sphere\.json$/);
