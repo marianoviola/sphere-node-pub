@@ -18,10 +18,18 @@ separate repository and are out of scope here.
 Public, unauthenticated, for agents:
 
 - `GET /.well-known/sphere.json` — publisher discovery (always `200`).
+- `GET /llms.txt` — plain-text discovery aid (llms.txt convention): publisher,
+  a pointer to the discovery document, and a flat list of fragment content URLs.
+- `GET /robots.txt` — allows every crawler, points at `/sitemap.xml`, and
+  declares [Content Signals](https://contentsignals.org) (`ai-train` off by
+  default; see `SPHERE_ALLOW_AI_TRAINING` below).
+- `GET /sitemap.xml` — the human index plus every fragment's canonical URL.
 - `GET /fragments/{id}/sphere.json` — fragment manifest.
 - `GET /fragments/{id}/content.md` — full content for `free` fragments, or a
   preview plus a `402` payment challenge for `paid`/`metered` fragments. In v1
-  the challenge is returned but not verified (payment is a dormant stub).
+  the challenge is returned but not verified (payment is a dormant stub). Also
+  reachable at the bare `GET /fragments/{id}` via `Accept: text/markdown`
+  content negotiation.
 
 Human, content-negotiated (browsers only):
 
@@ -38,6 +46,37 @@ Owner, bearer-token, read-only:
 
 The full contract is in [`spec/node-api.md`](spec/node-api.md) and
 [`spec/fragment.schema.json`](spec/fragment.schema.json).
+
+## Agent-readiness surface
+
+Beyond its own bespoke contract (`sphere.json` + `llms.txt`), the node
+advertises a compact set of emerging agent/crawler standards — everything
+that's honestly achievable without a real payment or checkout backend:
+`robots.txt` with Content Signals, `sitemap.xml`, `Accept: text/markdown`
+negotiation on `/fragments/{id}`, an alternate-discovery `Link` header on the
+human pages, and two commerce protocols shaped correctly by
+`access.payment.profile` — `x402` and `mpp` (see `spec/node-api.md`'s
+**Payment challenge shapes**).
+
+Explicitly out of scope, and why:
+
+- **ACP** (Agentic Commerce Protocol) and **UCP** (Universal Commerce
+  Protocol) — neither has a discovery-only mode; both require a real
+  checkout/cart API to honestly claim support.
+- **DNS-AID** — a DNS-zone-level convention (SVCB/TXT records), not
+  application code. Configure it at your DNS provider if you want it.
+- **Web Bot Auth** verification of inbound requests — a Cloudflare
+  zone-level feature (Verified Bots) if you're self-hosting behind
+  Cloudflare, not something this Worker can do on its own.
+- **MCP server discovery, Agent Skills, WebMCP** — this node is a content
+  server, not a tool/skill provider; publishing a capability manifest for
+  tools it doesn't have would be misleading. (The separate authoring plugin
+  is its own repository, out of scope here.)
+
+`SPHERE_ALLOW_AI_TRAINING` (a var, not a secret) controls the `ai-train`
+Content Signal in `/robots.txt`; it defaults to off. It has no effect on
+agent read/search access, which stays open regardless — that's the entire
+point of this project.
 
 ## Architecture
 

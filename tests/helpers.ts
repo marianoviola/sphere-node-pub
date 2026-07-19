@@ -116,6 +116,7 @@ export function testConfig(overrides: Partial<NodeConfig> = {}): NodeConfig {
     publisherName: "Test Publisher",
     defaultLicense: "CC-BY",
     ownerToken: "secret-owner-token",
+    allowAiTraining: false,
     ...overrides,
   };
 }

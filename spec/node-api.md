@@ -103,15 +103,28 @@ Ledger event: `manifest`.
 ### `GET /fragments/{id}/content.md`
 
 - Policy `free`: full content, `200`, `text/markdown`.
-- Policy `paid` or `metered`: HTTP `402` with a JSON body carrying the preview
-  (first `access.preview_chars` characters of the content) and the payment
-  challenge built from the manifest `access.payment` block. A
-  `WWW-Authenticate: Payment` header is also set.
+- Policy `paid` or `metered`: HTTP `402`. The exact shape is chosen by
+  `access.payment.profile` (case-insensitive) — see **Payment challenge
+  shapes** below. In v1 the challenge is RETURNED but NEVER VERIFIED; payment
+  verification and settlement are a dormant stub regardless of profile.
+
+`404` if the fragment is unknown.
+
+Also reachable at the fragment's bare canonical URL, `GET /fragments/{id}`,
+via content negotiation — see **Content negotiation on `/fragments/{id}`**
+below.
+
+Ledger event: `access` (free) or `payment_required` (gated).
+
+#### Payment challenge shapes
+
+**Generic (any profile other than `x402` or `mpp`, including unset)** — the
+original v1 shape, unchanged:
 
 ```http
 HTTP/1.1 402 Payment Required
 Content-Type: application/json
-WWW-Authenticate: Payment profile="MPP", endpoint="https://pay.example.com/mpp"
+WWW-Authenticate: Payment profile="MPP", endpoint="https://pay.example.com/mpp", price="0.02", currency="USD"
 
 {
   "policy": "paid",
@@ -126,10 +139,79 @@ WWW-Authenticate: Payment profile="MPP", endpoint="https://pay.example.com/mpp"
 }
 ```
 
-In v1 the challenge is RETURNED but NOT verified. Payment verification is a
-dormant stub. Ledger event: `access` (free) or `payment_required` (gated).
+**`profile: "mpp"`** — a real `Payment` HTTP auth-scheme challenge
+(paymentauth.org `draft-httpauth-payment-00`) on `WWW-Authenticate`. MPP is a
+header-level scheme, so the JSON body is unchanged from the generic shape
+above:
 
-`404` if the fragment is unknown.
+```http
+HTTP/1.1 402 Payment Required
+Content-Type: application/json
+WWW-Authenticate: Payment id="2026-01-15-x:mpp", realm="https://pay.example.com/mpp", method="PaymentAuth", intent="charge", request="eyJhbW91bnQiOjAuMDIsImN1cnJlbmN5IjoiVVNEIn0"
+```
+
+**`profile: "x402"`** — the entire body becomes the real x402
+`PaymentRequired` envelope (github.com/coinbase/x402 spec v2); there is no
+`WWW-Authenticate` header. `network`, `asset`, `pay_to`, `amount`, and
+`max_timeout_seconds` are optional fields on the manifest's `access.payment`
+block (additive; fall back to sane defaults when unset). Sphere's own preview
+text rides in `extensions.sphere`, x402's own designated extension point:
+
+```http
+HTTP/1.1 402 Payment Required
+Content-Type: application/json
+
+{
+  "x402Version": 1,
+  "resource": {
+    "url": "https://node.example/fragments/2026-01-15-x/content.md",
+    "description": "Fragment title",
+    "mimeType": "text/markdown"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "0.02",
+      "asset": "USDC",
+      "payTo": "0xabc123",
+      "maxTimeoutSeconds": 60,
+      "extra": { "currency": "USD" }
+    }
+  ],
+  "extensions": { "sphere": { "policy": "paid", "preview": "First N characters ..." } }
+}
+```
+
+None of these verify or settle a payment in v1 — only the challenge shape
+differs by profile. Two commerce standards checked by some agent-readiness
+audits, **ACP** (Agentic Commerce Protocol) and **UCP** (Universal Commerce
+Protocol), are intentionally NOT implemented: as of writing, neither has a
+discovery-only mode — both require a real checkout/cart API to honestly claim
+support, which is out of scope for this compact layer.
+
+### `GET /robots.txt`
+
+Plain text. Allows every user agent, points at `/sitemap.xml`, and declares
+[Content Signals](https://contentsignals.org): `search=yes, ai-input=yes`
+always (staying discoverable to search and agent-input crawlers is this
+project's entire purpose), and `ai-train` from `SPHERE_ALLOW_AI_TRAINING`
+(`"no"` unless the publisher explicitly sets it to `"yes"`). Served regardless
+of `Accept`; no ledger event.
+
+### `GET /sitemap.xml`
+
+Standard XML sitemap: the human index (`/`) plus every fragment's canonical
+reading page (`/fragments/{id}`), each with a `<lastmod>` derived from the
+node's own data (`updatedTs`; omitted for the root entry on an empty node).
+Served regardless of `Accept`; no ledger event.
+
+### Content negotiation on `/fragments/{id}`
+
+The bare canonical fragment URL negotiates three ways: `Accept: text/html`
+gets the human reading page (below); `Accept: text/markdown` gets exactly what
+`/fragments/{id}/content.md` returns (same status, body, and headers); any
+other `Accept` still `404`s, as it always has. Responses carry `Vary: Accept`.
 
 ## Human face (content-negotiated, for browsers)
 
@@ -142,6 +224,11 @@ human routes are additive: their paths returned `404` before and still `404`
 (as JSON) for non-HTML clients.
 
 A browser never sees a raw `402` or raw Markdown.
+
+Both human routes below also carry a `Link: </.well-known/sphere.json>;
+rel="alternate"; type="application/json"` header (the same target as the HTML
+`<link rel="alternate">` in each page's `<head>`), so a client that only reads
+headers — not HTML — can still find the machine surface.
 
 ### `GET /` (Accept: text/html)
 
