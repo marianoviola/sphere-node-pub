@@ -27,6 +27,11 @@ SPHERE_PUBLISHER_SUMMARY = "Agent-readable publishing, served by its own node"
 SPHERE_PUBLISHER_URL = "https://marianoviola.com"
 SPHERE_PUBLISHER_ICON = "https://sphere.pub/assets/sphere-mark.svg"
 SPHERE_DEFAULT_LICENSE = "CC-BY-NC"
+# Content Signals (contentsignals.org) `ai-train` directive in /robots.txt.
+# Off ("") by default; set to "yes" to opt in to AI-training use of this
+# node's content. Unrelated to agent read/search access, which stays open
+# either way — that's this project's whole purpose.
+SPHERE_ALLOW_AI_TRAINING = ""
 
 # SPHERE_OWNER_TOKEN is a SECRET, never a var and never committed:
 #   wrangler secret put SPHERE_OWNER_TOKEN

@@ -10,6 +10,8 @@ import { DEFAULT_PREVIEW_CHARS, gateContent } from "../../core/gate.ts";
 import { getContent, mediaKeyFor } from "../../core/fragments.ts";
 import { countWords } from "../../core/markdown.ts";
 import { toStoredFragment, validateManifest } from "../../core/publish.ts";
+import { renderRobotsTxt } from "../../core/robots.ts";
+import { renderSitemap } from "../../core/sitemap.ts";
 import type { JsonSchema } from "../../core/schema.ts";
 import type { FragmentManifest, PublisherRef } from "../../core/types.ts";
 // The publish route validates against the SAME contract the CLI uses. esbuild
@@ -57,6 +59,8 @@ export interface NodeConfig {
   publisherIcon?: string;
   defaultLicense: string;
   ownerToken: string;
+  /** Content-Signal `ai-train` directive in /robots.txt. Off by default. */
+  allowAiTraining: boolean;
 }
 
 export interface Deps {
@@ -83,6 +87,7 @@ interface Env {
   SPHERE_PUBLISHER_ICON?: string;
   SPHERE_DEFAULT_LICENSE: string;
   SPHERE_OWNER_TOKEN: string;
+  SPHERE_ALLOW_AI_TRAINING?: string;
 }
 
 function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -110,6 +115,14 @@ function asset(body: BodyInit, contentType: string): Response {
 function wantsHtml(request: Request): boolean {
   return (request.headers.get("accept") ?? "").includes("text/html");
 }
+
+/** Content negotiation: an agent that explicitly asks for text/markdown at a canonical fragment URL. */
+function wantsMarkdown(request: Request): boolean {
+  return (request.headers.get("accept") ?? "").includes("text/markdown");
+}
+
+/** Alternate-discovery Link header: same target as the human page's <link rel="alternate">. */
+const ALTERNATE_DISCOVERY_LINK = '</.well-known/sphere.json>; rel="alternate"; type="application/json"';
 
 /** Stable path at which the node serves its own canonical mark. */
 const MARK_PATH = "/assets/sphere-mark.svg";
@@ -250,13 +263,33 @@ async function handleContent(
   const content = await getContent(deps.blobs, fragment);
   if (content === null) return json({ error: "content_not_found", id }, 404);
 
-  const result = gateContent(fragment.manifest, content);
+  const contentUrl = `${canonicalFor(request, id)}/content.md`;
+  const result = gateContent(fragment.manifest, content, contentUrl);
   logEvent(deps, ctx, request, id, result.eventType);
 
   const headers: Record<string, string> = { "content-type": result.contentType };
   if (result.wwwAuthenticate) headers["www-authenticate"] = result.wwwAuthenticate;
 
   return new Response(result.body, { status: result.status, headers });
+}
+
+/**
+ * `/robots.txt`: points crawlers at the sitemap and declares Content Signals.
+ * Served regardless of Accept; appends no ledger event, like /llms.txt.
+ */
+async function handleRobotsTxt(deps: Deps, request: Request): Promise<Response> {
+  const body = renderRobotsTxt({ allowAiTraining: deps.config.allowAiTraining }, new URL(request.url).origin);
+  return new Response(body, { headers: { "content-type": "text/plain; charset=utf-8" } });
+}
+
+/**
+ * `/sitemap.xml`: the human index plus every fragment's canonical reading
+ * page. Served regardless of Accept; appends no ledger event, like /llms.txt.
+ */
+async function handleSitemap(deps: Deps, request: Request): Promise<Response> {
+  const fragments = await deps.fragments.list();
+  const body = renderSitemap(fragments, new URL(request.url).origin);
+  return new Response(body, { headers: { "content-type": "application/xml; charset=utf-8" } });
 }
 
 // --- Human face -------------------------------------------------------------
@@ -282,7 +315,9 @@ async function handleHumanIndex(deps: Deps, ctx: RequestContext, request: Reques
       };
     }),
   );
-  return html(renderIndexPage(chromeFor(deps, request), views));
+  const res = html(renderIndexPage(chromeFor(deps, request), views));
+  res.headers.set("link", ALTERNATE_DISCOVERY_LINK);
+  return res;
 }
 
 async function handleHumanFragment(
@@ -326,7 +361,7 @@ async function handleHumanFragment(
 
   // A human page never completes payment: a gated view is a preview-only read.
   logEvent(deps, ctx, request, id, gated ? "preview" : "access");
-  return html(
+  const res = html(
     renderFragmentPage(
       chromeFor(deps, request),
       fragment.manifest,
@@ -340,6 +375,9 @@ async function handleHumanFragment(
       relationTitles,
     ),
   );
+  res.headers.set("link", ALTERNATE_DISCOVERY_LINK);
+  res.headers.set("vary", "accept");
+  return res;
 }
 
 function isOwner(deps: Deps, request: Request): boolean {
@@ -521,6 +559,15 @@ async function routeGet(
     return handleLlmsTxt(deps, request);
   }
 
+  // Discoverability: robots.txt (Content Signals + a pointer at the sitemap)
+  // and sitemap.xml. Fixed paths, served to any client; no ledger event.
+  if (path === "/robots.txt") {
+    return handleRobotsTxt(deps, request);
+  }
+  if (path === "/sitemap.xml") {
+    return handleSitemap(deps, request);
+  }
+
   const manifestMatch = path.match(/^\/fragments\/([^/]+)\/sphere\.json$/);
   if (manifestMatch) {
     return handleManifest(deps, ctx, request, decodeURIComponent(manifestMatch[1]!));
@@ -558,6 +605,18 @@ async function routeGet(
     const fragmentPageMatch = path.match(/^\/fragments\/([^/]+)\/?$/);
     if (fragmentPageMatch) {
       return handleHumanFragment(deps, ctx, request, decodeURIComponent(fragmentPageMatch[1]!));
+    }
+  }
+
+  // Content Accessibility: an agent that asks for text/markdown at a
+  // fragment's canonical URL (rather than the fixed /content.md sub-path)
+  // gets the exact same machine response handleContent already serves there.
+  if (wantsMarkdown(request)) {
+    const fragmentPageMatch = path.match(/^\/fragments\/([^/]+)\/?$/);
+    if (fragmentPageMatch) {
+      const res = await handleContent(deps, ctx, request, decodeURIComponent(fragmentPageMatch[1]!));
+      res.headers.set("vary", "accept");
+      return res;
     }
   }
 
@@ -614,6 +673,7 @@ export function depsFromEnv(env: Env): Deps {
       publisherIcon: env.SPHERE_PUBLISHER_ICON || undefined,
       defaultLicense: env.SPHERE_DEFAULT_LICENSE ?? "CC-BY",
       ownerToken: env.SPHERE_OWNER_TOKEN ?? "",
+      allowAiTraining: (env.SPHERE_ALLOW_AI_TRAINING ?? "").toLowerCase() === "yes",
     },
   };
 }

@@ -339,3 +339,94 @@ describe("root front door", () => {
     expect(events.map((e) => e.eventType)).toEqual(["discovery"]);
   });
 });
+
+describe("/robots.txt", () => {
+  it("serves Content Signals with ai-train off by default and logs no ledger event", async () => {
+    const deps = makeDeps();
+    const ctx = testCtx();
+    const res = await handleRequest(get("/robots.txt"), deps, ctx);
+    await ctx.settle();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    const body = await res.text();
+    expect(body).toContain("Sitemap: https://node.example/sitemap.xml");
+    expect(body).toContain("Content-Signal: search=yes, ai-input=yes, ai-train=no");
+    const events = (deps.events as ReturnType<typeof makeDeps>["events"] & { events: unknown[] }).events;
+    expect(events.length).toBe(0);
+  });
+
+  it("flips ai-train to yes when SPHERE_ALLOW_AI_TRAINING is configured on", async () => {
+    const deps = makeDeps({ config: testConfig({ allowAiTraining: true }) });
+    const res = await handleRequest(get("/robots.txt"), deps, testCtx());
+    expect(await res.text()).toContain("ai-train=yes");
+  });
+});
+
+describe("/sitemap.xml", () => {
+  it("lists the root and every fragment's canonical URL, and logs no ledger event", async () => {
+    const deps = makeDeps();
+    seed(deps, freeManifest, "free body");
+    const ctx = testCtx();
+    const res = await handleRequest(get("/sitemap.xml"), deps, ctx);
+    await ctx.settle();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/xml");
+    const body = await res.text();
+    expect(body).toContain("<loc>https://node.example/</loc>");
+    expect(body).toContain("<loc>https://node.example/fragments/2026-01-15-free</loc>");
+    const events = (deps.events as ReturnType<typeof makeDeps>["events"] & { events: unknown[] }).events;
+    expect(events.length).toBe(0);
+  });
+});
+
+describe("Accept: text/markdown at the canonical fragment URL", () => {
+  it("serves the same 200 markdown body as /fragments/{id}/content.md for a free fragment", async () => {
+    const deps = makeDeps();
+    seed(deps, freeManifest, "the full free body");
+
+    const bare = await handleRequest(get("/fragments/2026-01-15-free", { accept: "text/markdown" }), deps, testCtx());
+    expect(bare.status).toBe(200);
+    expect(bare.headers.get("content-type")).toContain("text/markdown");
+    expect(bare.headers.get("vary")).toContain("accept");
+    expect(await bare.text()).toBe("the full free body");
+  });
+
+  it("serves the same 402 challenge as /fragments/{id}/content.md for a gated fragment", async () => {
+    const deps = makeDeps();
+    seed(deps, paidManifest, "SECRET CONTENT that is long enough to be truncated");
+
+    const bare = await handleRequest(get("/fragments/2026-01-16-paid", { accept: "text/markdown" }), deps, testCtx());
+    expect(bare.status).toBe(402);
+    expect(bare.headers.get("www-authenticate")).toContain("Payment");
+    const payload = await readJson(bare);
+    expect(payload.preview).toBe("SECRET CONTE");
+  });
+
+  it("still 404s a bare fragment URL for an Accept the node doesn't negotiate", async () => {
+    const deps = makeDeps();
+    seed(deps, freeManifest, "body");
+    const res = await handleRequest(get("/fragments/2026-01-15-free", { accept: "application/json" }), deps, testCtx());
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("alternate-discovery Link header", () => {
+  it("is set on the human index", async () => {
+    const deps = makeDeps();
+    const res = await handleRequest(get("/", { accept: "text/html" }), deps, testCtx());
+    expect(res.headers.get("link")).toBe('</.well-known/sphere.json>; rel="alternate"; type="application/json"');
+  });
+
+  it("is set on a human fragment page", async () => {
+    const deps = makeDeps();
+    seed(deps, freeManifest, "body");
+    const res = await handleRequest(
+      get("/fragments/2026-01-15-free", { accept: "text/html" }),
+      deps,
+      testCtx(),
+    );
+    expect(res.headers.get("link")).toBe('</.well-known/sphere.json>; rel="alternate"; type="application/json"');
+  });
+});
